@@ -49,9 +49,9 @@ async function getInventoryData() {
 
   return {
     rolls,
-    clients: clientsResult.rows as unknown as { id: number; name: string; type: string }[],
-    products: productsResult.rows as unknown as { id: number; name: string; code: string; color: string; width: number }[],
-    lots: lotsResult.rows as unknown as { id: number; lotNumber: string }[],
+    clients: clientsResult.rows.map(r => ({ id: r.id as number, name: r.name as string, type: r.type as string })),
+    products: productsResult.rows.map(r => ({ id: r.id as number, name: r.name as string, code: r.code as string, color: r.color as string, width: r.width as number })),
+    lots: lotsResult.rows.map(r => ({ id: r.id as number, lotNumber: r.lotNumber as string })),
   };
 }
 
