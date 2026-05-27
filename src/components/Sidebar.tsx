@@ -12,18 +12,20 @@ interface SidebarUser {
 }
 
 const NAV = [
-  { href: '/dashboard',              icon: '◈', label: 'Dashboard',      roles: ['OWNER', 'WAREHOUSE'] },
-  { href: '/inventory',              icon: '⊟', label: 'Inventario',     roles: ['OWNER', 'WAREHOUSE'] },
-  { href: '/inventory?tab=remnants', icon: '◫', label: 'Remanentes',     roles: ['OWNER', 'WAREHOUSE'] },
-  { href: '/inventory?exitModal=1',  icon: '↑', label: 'Nueva Salida',   roles: ['OWNER', 'WAREHOUSE'] },
-  { href: '/catalog',                icon: '⊞', label: 'Catálogo',       roles: ['OWNER'] },
-  { href: '/movements',              icon: '↕', label: 'Movimientos',    roles: ['OWNER', 'WAREHOUSE'] },
-  { href: '/clients',                icon: '◎', label: 'Clientes',       roles: ['OWNER'] },
+  { href: '/dashboard',              icon: '◈', label: 'Dashboard',      roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/inventory',              icon: '⊟', label: 'Inventario',     roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/inventory?tab=remnants', icon: '◫', label: 'Remanentes',     roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/inventory?exitModal=1',  icon: '↑', label: 'Nueva Salida',   roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/catalog',                icon: '⊞', label: 'Catálogo',       roles: ['OWNER', 'ADMIN'] },
+  { href: '/movements',              icon: '↕', label: 'Movimientos',    roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/clients',                icon: '◎', label: 'Clientes',       roles: ['OWNER', 'ADMIN'] },
   { href: '/users',                  icon: '◯', label: 'Usuarios',       roles: ['OWNER'] },
+  { href: '/audit',                  icon: '◩', label: 'Auditoría',      roles: ['OWNER'] },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: 'Socio',
+  ADMIN: 'Admin',
   WAREHOUSE: 'Bodega',
 };
 

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 const DEMO_USERS = [
   { email: 'samir@disa.co', password: 'admin2026', label: 'Socio', role: 'OWNER' },
   { email: 'william@disa.co', password: 'william2026', label: 'Socio', role: 'OWNER' },
+  { email: 'admin@disa.co', password: 'admin2026', label: 'Admin', role: 'ADMIN' },
   { email: 'bodega@disa.co', password: 'bodega2026', label: 'Bodega', role: 'WAREHOUSE' },
 ];
 
@@ -124,6 +125,7 @@ export default function LoginPage() {
                 <span className="text-[#888] text-xs">{u.email}</span>
                 <span className={`text-xs font-medium px-2 py-0.5 rounded ${
                   u.role === 'OWNER' ? 'bg-amber-950/60 text-amber-400' :
+                  u.role === 'ADMIN' ? 'bg-blue-950/60 text-blue-400' :
                   'bg-green-950/60 text-green-400'
                 }`}>
                   {u.label}

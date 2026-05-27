@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 
 const SECRET = new TextEncoder().encode(
-  process.env.NEXTAUTH_SECRET ?? 'disa-nyro-secret-2026-inventarios'
+  process.env.NEXTAUTH_SECRET ?? 'disa-inventory-secret-2026'
 );
 const COOKIE = 'disa-session';
 

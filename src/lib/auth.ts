@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import db from './db';
 
-export type Role = 'OWNER' | 'WAREHOUSE';
+export type Role = 'OWNER' | 'ADMIN' | 'WAREHOUSE';
 
 export interface User {
   id: number;
@@ -55,9 +55,17 @@ export function canSeeFinancials(role: Role): boolean {
 }
 
 export function canManageInventory(role: Role): boolean {
-  return role === 'OWNER';
+  return role === 'OWNER' || role === 'ADMIN';
 }
 
 export function canRegisterMovement(_role: Role): boolean {
   return true;
+}
+
+export function canManageClients(role: Role): boolean {
+  return role === 'OWNER' || role === 'ADMIN';
+}
+
+export function canSeeCatalog(role: Role): boolean {
+  return role === 'OWNER' || role === 'ADMIN';
 }

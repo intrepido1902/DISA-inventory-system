@@ -1,12 +1,16 @@
 // setup-db.js — ejecutar con: node setup-db.js
 // Elimina todas las tablas y recrea la base de datos con datos de prueba.
+require('dotenv').config();
 
 async function main() {
   const { createClient } = await import('@libsql/client');
   const bcryptjs = await import('bcryptjs');
   const bcrypt = bcryptjs.default ?? bcryptjs;
 
-  const db = createClient({ url: 'file:./dev.db' });
+  const url = process.env.DATABASE_URL ?? 'file:./dev.db';
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+
+  const db = createClient({ url, ...(authToken ? { authToken } : {}) });
 
   console.log('🗑️  Eliminando tablas existentes...');
   await db.executeMultiple(`
@@ -28,7 +32,7 @@ async function main() {
       email TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('OWNER','WAREHOUSE')),
+      role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','WAREHOUSE')),
       active INTEGER NOT NULL DEFAULT 1,
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
@@ -134,9 +138,10 @@ async function main() {
 
   // ── USERS ─────────────────────────────────────────────────────────────────
   console.log('👤 Insertando usuarios...');
-  const [hash1, hash2, hash3] = await Promise.all([
+  const [hash1, hash2, hash3, hash4] = await Promise.all([
     bcrypt.hash('admin2026', 10),
     bcrypt.hash('william2026', 10),
+    bcrypt.hash('admin2026', 10),
     bcrypt.hash('bodega2026', 10),
   ]);
 
@@ -148,7 +153,10 @@ async function main() {
     VALUES ('william@disa.co', '${hash2}', 'William López', 'OWNER', 1, ${now}, ${now});
 
     INSERT INTO User (email, password, name, role, active, createdAt, updatedAt)
-    VALUES ('bodega@disa.co', '${hash3}', 'Carlos Pérez', 'WAREHOUSE', 1, ${now}, ${now});
+    VALUES ('admin@disa.co', '${hash3}', 'Ana García', 'ADMIN', 1, ${now}, ${now});
+
+    INSERT INTO User (email, password, name, role, active, createdAt, updatedAt)
+    VALUES ('bodega@disa.co', '${hash4}', 'Carlos Pérez', 'WAREHOUSE', 1, ${now}, ${now});
   `);
 
   // ── CATEGORIES ────────────────────────────────────────────────────────────
@@ -225,7 +233,6 @@ async function main() {
 
   // ── ROLLS (~83 rollos) ────────────────────────────────────────────────────
   console.log('🧶 Insertando rollos (~83)...');
-  // [code, lotId, suffix, initial, current, location, isRemnant]
   const rollData = [
     ['VP-001', lot1, '001', 150, 150, 'A-01', 0], ['VP-001', lot1, '002', 130, 105, 'A-01', 0],
     ['VP-001', lot2, '003', 160, 160, 'A-02', 0], ['VP-001', lot2, '004', 120,   8, 'A-02', 1],
@@ -308,7 +315,7 @@ async function main() {
 
   // ── SAMPLE MOVEMENTS (today) ──────────────────────────────────────────────
   console.log('📊 Insertando movimientos de muestra...');
-  const rollRows  = await db.execute('SELECT id FROM Roll ORDER BY id LIMIT 6');
+  const rollRows  = await db.execute('SELECT id, productId FROM Roll ORDER BY id LIMIT 6');
   const clientRows = await db.execute('SELECT id FROM Client ORDER BY id LIMIT 3');
   const userRow   = await db.execute('SELECT id FROM User ORDER BY id LIMIT 1');
   const userId    = userRow.rows[0].id;
@@ -324,10 +331,17 @@ async function main() {
     const exit = sampleExits[i];
     if (exit.rollIdx >= rollRows.rows.length) continue;
     const rollId = rollRows.rows[exit.rollIdx].id;
+    const productId = rollRows.rows[exit.rollIdx].productId;
     const clientId = clientRows.rows[exit.clientIdx % clientRows.rows.length].id;
+
+    // Get priceB2B for this product
+    const priceRow = await db.execute({ sql: 'SELECT priceB2B FROM Product WHERE id = ?', args: [productId] });
+    const priceB2B = priceRow.rows[0]?.priceB2B ?? 0;
+    const total = exit.meters * priceB2B;
+
     const saleResult = await db.execute({
-      sql: `INSERT INTO Sale (clientId, date, total, createdAt) VALUES (?, ?, null, ?)`,
-      args: [clientId, today, now - (i * 3600000)],
+      sql: `INSERT INTO Sale (clientId, date, total, createdAt) VALUES (?, ?, ?, ?)`,
+      args: [clientId, today, total, now - (i * 3600000)],
     });
     await db.execute({
       sql: `INSERT INTO Movement (type, rollId, meters, userId, saleId, notes, barcodeUsed, createdAt)
@@ -346,10 +360,11 @@ async function main() {
     });
   }
 
-  console.log('\n✅ Base de datos inicializada correctamente!');
-  console.log('\n👤 Usuarios:');
-  console.log('   samir@disa.co    / admin2026   → OWNER (Samir Moya)');
-  console.log('   william@disa.co  / william2026 → OWNER (William López)');
+  console.log('\n✅ Base de datos lista!\n');
+  console.log('👤 Usuarios:');
+  console.log('   samir@disa.co    / admin2026   → OWNER   (Samir Moya)');
+  console.log('   william@disa.co  / william2026 → OWNER   (William López)');
+  console.log('   admin@disa.co    / admin2026   → ADMIN   (Ana García)');
   console.log('   bodega@disa.co   / bodega2026  → WAREHOUSE (Carlos Pérez)');
   console.log('\n🚀 Ejecuta: npm run dev\n');
 }

@@ -63,7 +63,7 @@ export default function CatalogClient({ products, isOwner }: { products: Product
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filtered.map(product => {
           const hasStock = product.totalMeters > 0;
-          const lowStock = product.totalMeters > 0 && product.totalMeters < 50;
+          const lowStock = product.totalMeters > 0 && product.totalMeters < 100;
 
           return (
             <div
