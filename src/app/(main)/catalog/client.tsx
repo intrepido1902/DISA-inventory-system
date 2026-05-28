@@ -29,9 +29,9 @@ export default function CatalogClient({ products, isOwner }: { products: Product
   const blackoutCount = products.filter(p => p.category.name === 'Blackout').length;
 
   return (
-    <div className="p-6">
+    <div className="p-4 lg:p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Catálogo</h1>
+        <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Catálogo</h1>
         <p className="text-sm text-gray-500 mt-0.5">{veloCount} velos · {blackoutCount} blackout</p>
       </div>
 
@@ -60,7 +60,7 @@ export default function CatalogClient({ products, isOwner }: { products: Product
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
         {filtered.map(product => {
           const hasStock = product.totalMeters > 0;
           const lowStock = product.totalMeters > 0 && product.totalMeters < 100;

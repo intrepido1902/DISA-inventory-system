@@ -63,9 +63,9 @@ export default function MovementsClient({ movements, isOwner }: { movements: Mov
   const colSpan = isOwner ? 10 : 8;
 
   return (
-    <div className="p-6">
+    <div className="p-4 lg:p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Movimientos</h1>
+        <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Movimientos</h1>
         <p className="text-sm text-gray-500 mt-0.5">Últimos {movements.length} registros</p>
       </div>
 
@@ -113,7 +113,7 @@ export default function MovementsClient({ movements, isOwner }: { movements: Mov
 
       <div className="bg-white rounded-lg border border-[#E5E5E5] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-[#E5E5E5] text-xs text-gray-500 uppercase tracking-wide bg-gray-50">
                 <th className="px-4 py-3 text-left">Fecha / Hora</th>
