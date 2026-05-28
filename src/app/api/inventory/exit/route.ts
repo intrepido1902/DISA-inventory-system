@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -17,11 +17,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'exitType debe ser EXIT_FULL o EXIT_PARTIAL' }, { status: 400 });
     }
 
-    // Fetch roll
-    const rollResult = await db.execute({
-      sql: 'SELECT id, currentMeters, status FROM Roll WHERE id = ?',
-      args: [rollId],
-    });
+    // Fetch roll + priceB2B for total calculation
+    const rollResult = await pool.query(
+      `SELECT r.id, r."currentMeters", r.status, p."priceB2B"
+       FROM "Roll" r
+       JOIN "Product" p ON r."productId" = p.id
+       WHERE r.id = $1`,
+      [rollId]
+    );
 
     if (rollResult.rows.length === 0) {
       return Response.json({ error: 'Rollo no encontrado' }, { status: 404 });
@@ -34,13 +37,13 @@ export async function POST(request: NextRequest) {
     }
 
     const currentMeters = roll.currentMeters as number;
+    const priceB2B = roll.priceB2B as number;
 
     let metersUsed: number;
 
     if (exitType === 'EXIT_FULL') {
       metersUsed = currentMeters;
     } else {
-      // EXIT_PARTIAL
       const metersNum = Number(meters);
       if (isNaN(metersNum) || metersNum <= 0) {
         return Response.json({ error: 'Los metros deben ser un número positivo' }, { status: 400 });
@@ -54,49 +57,45 @@ export async function POST(request: NextRequest) {
     }
 
     const newMeters = currentMeters - metersUsed;
-    // Remnant threshold: ≤10m remaining
     const isRemnant = newMeters > 0 && newMeters <= 10 ? 1 : 0;
     const newStatus = newMeters === 0 ? 'DEPLETED' : 'ACTIVE';
     const now = Date.now();
     const today = new Date().toISOString().split('T')[0];
+    const total = metersUsed * priceB2B;
 
-    // Update roll
-    await db.execute({
-      sql: `UPDATE Roll SET currentMeters = ?, status = ?, isRemnant = ?, updatedAt = ? WHERE id = ?`,
-      args: [newMeters, newStatus, isRemnant, now, rollId],
-    });
+    await pool.query(
+      `UPDATE "Roll" SET "currentMeters" = $1, status = $2, "isRemnant" = $3, "updatedAt" = $4 WHERE id = $5`,
+      [newMeters, newStatus, isRemnant, now, rollId]
+    );
 
-    // Create sale
-    const saleResult = await db.execute({
-      sql: `INSERT INTO Sale (clientId, date, total, createdAt) VALUES (?, ?, null, ?)`,
-      args: [clientId, today, now],
-    });
-    const saleId = saleResult.lastInsertRowid;
+    const saleResult = await pool.query(
+      `INSERT INTO "Sale" ("clientId", date, total, "createdAt") VALUES ($1, $2, $3, $4) RETURNING id`,
+      [clientId, today, total, now]
+    );
+    const saleId = saleResult.rows[0].id;
 
-    // Create movement
-    const movResult = await db.execute({
-      sql: `INSERT INTO Movement (type, rollId, meters, userId, saleId, notes, barcodeUsed, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-      args: [exitType, rollId, metersUsed, session.userId, saleId, notes ?? null, now],
-    });
+    const movResult = await pool.query(
+      `INSERT INTO "Movement" (type, "rollId", meters, "userId", "saleId", notes, "barcodeUsed", "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, 0, $7) RETURNING id`,
+      [exitType, rollId, metersUsed, session.userId, saleId, notes ?? null, now]
+    );
 
-    // Create audit log
-    await db.execute({
-      sql: `INSERT INTO AuditLog (userId, action, entity, entityId, oldData, newData, createdAt)
-            VALUES (?, ?, 'Roll', ?, ?, ?, ?)`,
-      args: [
+    await pool.query(
+      `INSERT INTO "AuditLog" ("userId", action, entity, "entityId", "oldData", "newData", "createdAt")
+       VALUES ($1, $2, 'Roll', $3, $4, $5, $6)`,
+      [
         session.userId,
         exitType,
         rollId,
         JSON.stringify({ currentMeters }),
         JSON.stringify({ currentMeters: newMeters, status: newStatus }),
         now,
-      ],
-    });
+      ]
+    );
 
     return Response.json({
       ok: true,
-      movementId: Number(movResult.lastInsertRowid),
+      movementId: movResult.rows[0].id,
       newMeters,
       newStatus,
       isRemnant: isRemnant === 1,

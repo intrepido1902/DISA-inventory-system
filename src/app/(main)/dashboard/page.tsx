@@ -1,6 +1,6 @@
 import { getSession } from '@/lib/session';
-import { canSeeFinancials } from '@/lib/auth';
-import db from '@/lib/db';
+import { canSeeFinancials, type Role } from '@/lib/auth';
+import { pool } from '@/lib/db';
 
 function formatCOP(n: number) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
@@ -15,54 +15,50 @@ function formatTime(ts: number) {
 }
 
 async function getDashboardData(role: string) {
-  const now = Date.now();
   const dayStart = new Date().setHours(0, 0, 0, 0);
-  const isOwner = canSeeFinancials(role as 'OWNER' | 'WAREHOUSE');
+  const isOwner = canSeeFinancials(role as Role);
 
   const [totals, byCategory, remnants, lowStock, todayMovements] = await Promise.all([
-    db.execute(`
+    pool.query(`
       SELECT
-        COALESCE(SUM(currentMeters), 0) as totalMeters,
-        COUNT(*) as totalRolls,
-        COUNT(DISTINCT productId) as totalProducts
-      FROM Roll WHERE status = 'ACTIVE'
+        COALESCE(SUM("currentMeters"), 0) as "totalMeters",
+        COUNT(*) as "totalRolls",
+        COUNT(DISTINCT "productId") as "totalProducts"
+      FROM "Roll" WHERE status = 'ACTIVE'
     `),
-    db.execute(`
-      SELECT c.name, COUNT(r.id) as rolls, COALESCE(SUM(r.currentMeters), 0) as meters
-      FROM Roll r
-      JOIN Product p ON r.productId = p.id
-      JOIN Category c ON p.categoryId = c.id
+    pool.query(`
+      SELECT c.name, COUNT(r.id) as rolls, COALESCE(SUM(r."currentMeters"), 0) as meters
+      FROM "Roll" r
+      JOIN "Product" p ON r."productId" = p.id
+      JOIN "Category" c ON p."categoryId" = c.id
       WHERE r.status = 'ACTIVE'
-      GROUP BY c.id
+      GROUP BY c.id, c.name
     `),
-    db.execute(`SELECT COUNT(*) as count FROM Roll WHERE isRemnant = 1 AND status = 'ACTIVE'`),
-    db.execute(`
-      SELECT p.name, p.code, COALESCE(SUM(r.currentMeters), 0) as totalMeters
-      FROM Product p
-      LEFT JOIN Roll r ON r.productId = p.id AND r.status = 'ACTIVE'
+    pool.query(`SELECT COUNT(*) as count FROM "Roll" WHERE "isRemnant" = 1 AND status = 'ACTIVE'`),
+    pool.query(`
+      SELECT p.name, p.code, COALESCE(SUM(r."currentMeters"), 0) as "totalMeters"
+      FROM "Product" p
+      LEFT JOIN "Roll" r ON r."productId" = p.id AND r.status = 'ACTIVE'
       WHERE p.active = 1
-      GROUP BY p.id
-      HAVING totalMeters < 100
-      ORDER BY totalMeters ASC
+      GROUP BY p.id, p.name, p.code
+      HAVING COALESCE(SUM(r."currentMeters"), 0) < 100
+      ORDER BY COALESCE(SUM(r."currentMeters"), 0) ASC
       LIMIT 5
     `),
-    db.execute({
-      sql: `
-        SELECT m.id, m.type, m.meters, m.createdAt,
-               r.rollNumber, p.name as productName, p.color, p.priceB2B,
-               u.name as userName, cl.name as clientName
-        FROM Movement m
-        JOIN Roll r ON m.rollId = r.id
-        JOIN Product p ON r.productId = p.id
-        JOIN User u ON m.userId = u.id
-        LEFT JOIN Sale s ON m.saleId = s.id
-        LEFT JOIN Client cl ON s.clientId = cl.id
-        WHERE m.createdAt >= ?
-        ORDER BY m.createdAt DESC
-        LIMIT 20
-      `,
-      args: [dayStart],
-    }),
+    pool.query(`
+      SELECT m.id, m.type, m.meters, m."createdAt",
+             r."rollNumber", p.name as "productName", p.color, p."priceB2B",
+             u.name as "userName", cl.name as "clientName"
+      FROM "Movement" m
+      JOIN "Roll" r ON m."rollId" = r.id
+      JOIN "Product" p ON r."productId" = p.id
+      JOIN "User" u ON m."userId" = u.id
+      LEFT JOIN "Sale" s ON m."saleId" = s.id
+      LEFT JOIN "Client" cl ON s."clientId" = cl.id
+      WHERE m."createdAt" >= $1
+      ORDER BY m."createdAt" DESC
+      LIMIT 20
+    `, [dayStart]),
   ]);
 
   const t = totals.rows[0];
@@ -72,21 +68,18 @@ async function getDashboardData(role: string) {
 
   if (isOwner) {
     const [val, dayTot] = await Promise.all([
-      db.execute(`
-        SELECT COALESCE(SUM(r.currentMeters * p.priceB2B), 0) as v
-        FROM Roll r JOIN Product p ON r.productId = p.id
+      pool.query(`
+        SELECT COALESCE(SUM(r."currentMeters" * p."priceB2B"), 0) as v
+        FROM "Roll" r JOIN "Product" p ON r."productId" = p.id
         WHERE r.status = 'ACTIVE'
       `),
-      db.execute({
-        sql: `
-          SELECT COALESCE(SUM(m.meters * p.priceB2B), 0) as total
-          FROM Movement m
-          JOIN Roll r ON m.rollId = r.id
-          JOIN Product p ON r.productId = p.id
-          WHERE m.createdAt >= ? AND m.type IN ('EXIT_FULL','EXIT_PARTIAL')
-        `,
-        args: [dayStart],
-      }),
+      pool.query(`
+        SELECT COALESCE(SUM(m.meters * p."priceB2B"), 0) as total
+        FROM "Movement" m
+        JOIN "Roll" r ON m."rollId" = r.id
+        JOIN "Product" p ON r."productId" = p.id
+        WHERE m."createdAt" >= $1 AND m.type IN ('EXIT_FULL','EXIT_PARTIAL')
+      `, [dayStart]),
     ]);
     inventoryValue = val.rows[0].v as number;
     dayTotal = dayTot.rows[0].total as number;
@@ -103,7 +96,6 @@ async function getDashboardData(role: string) {
     inventoryValue,
     dayTotal,
     isOwner,
-    now,
   };
 }
 
@@ -129,14 +121,12 @@ export default async function DashboardPage() {
     WRITE_OFF: 'text-gray-600 bg-gray-100',
   };
 
-  // Day total sum from todayMovements (exits only)
   const exitMovements = data.todayMovements.filter(
     (m: Record<string, unknown>) => m.type === 'EXIT_FULL' || m.type === 'EXIT_PARTIAL'
   );
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-gray-900">
           Bienvenido, {session!.name.split(' ')[0]}
@@ -144,7 +134,6 @@ export default async function DashboardPage() {
         <p className="text-gray-500 text-sm mt-1 capitalize">{today}</p>
       </div>
 
-      {/* Low stock alerts */}
       {data.lowStock.length > 0 && (
         <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
           <p className="text-amber-800 text-sm font-medium mb-1">⚠ Referencias con stock bajo (&lt; 100 m)</p>
@@ -158,7 +147,6 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard
           label="Metros disponibles"
@@ -192,7 +180,6 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* Today movements */}
       <div className="bg-white rounded-lg border border-[#E5E5E5]">
         <div className="px-5 py-4 border-b border-[#E5E5E5] flex items-center justify-between">
           <div>

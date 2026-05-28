@@ -1,11 +1,11 @@
 import { getSession } from '@/lib/session';
-import { canManageInventory } from '@/lib/auth';
+import { canManageClients, type Role } from '@/lib/auth';
 import { redirect } from 'next/navigation';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 
 async function getClients() {
-  const result = await db.execute(
-    'SELECT id, name, type, phone, email, notes, active, createdAt FROM Client ORDER BY name'
+  const result = await pool.query(
+    `SELECT id, name, type, phone, email, notes, active, "createdAt" FROM "Client" ORDER BY name`
   );
   return result.rows;
 }
@@ -18,7 +18,7 @@ const TYPE_CLASS: Record<string, string> = {
 
 export default async function ClientsPage() {
   const session = await getSession();
-  if (!canManageInventory(session!.role as 'OWNER' | 'WAREHOUSE')) {
+  if (!canManageClients(session!.role as Role)) {
     redirect('/dashboard');
   }
 
@@ -59,9 +59,9 @@ export default async function ClientsPage() {
                         {TYPE_LABEL[c.type as string] ?? c.type as string}
                       </span>
                     </td>
-                    <td className="px-5 py-3 text-gray-600 tabular-nums">{c.phone as string ?? '—'}</td>
-                    <td className="px-5 py-3 text-gray-600">{c.email as string ?? '—'}</td>
-                    <td className="px-5 py-3 text-gray-400 text-xs max-w-xs truncate">{c.notes as string ?? '—'}</td>
+                    <td className="px-5 py-3 text-gray-600 tabular-nums">{(c.phone as string) ?? '—'}</td>
+                    <td className="px-5 py-3 text-gray-600">{(c.email as string) ?? '—'}</td>
+                    <td className="px-5 py-3 text-gray-400 text-xs max-w-xs truncate">{(c.notes as string) ?? '—'}</td>
                   </tr>
                 ))
               )}

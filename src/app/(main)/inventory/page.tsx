@@ -1,26 +1,26 @@
 import { getSession } from '@/lib/session';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 import InventoryClient from './client';
 
 async function getInventoryData() {
   const [rollsResult, clientsResult, productsResult, lotsResult] = await Promise.all([
-    db.execute(`
+    pool.query(`
       SELECT
-        r.id, r.rollNumber, r.barcode, r.initialMeters, r.currentMeters,
-        r.location, r.status, r.isRemnant, r.updatedAt,
-        p.id as productId, p.name as productName, p.code as productCode,
-        p.color, p.width, p.priceOwner, p.priceB2B, p.priceB2C,
-        c.id as categoryId, c.name as categoryName,
-        l.id as lotId, l.lotNumber
-      FROM Roll r
-      JOIN Product p ON r.productId = p.id
-      JOIN Category c ON p.categoryId = c.id
-      LEFT JOIN ImportLot l ON r.lotId = l.id
-      ORDER BY r.status ASC, r.updatedAt DESC
+        r.id, r."rollNumber", r.barcode, r."initialMeters", r."currentMeters",
+        r.location, r.status, r."isRemnant", r."updatedAt",
+        p.id as "productId", p.name as "productName", p.code as "productCode",
+        p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C",
+        c.id as "categoryId", c.name as "categoryName",
+        l.id as "lotId", l."lotNumber"
+      FROM "Roll" r
+      JOIN "Product" p ON r."productId" = p.id
+      JOIN "Category" c ON p."categoryId" = c.id
+      LEFT JOIN "ImportLot" l ON r."lotId" = l.id
+      ORDER BY r.status ASC, r."updatedAt" DESC
     `),
-    db.execute('SELECT id, name, type FROM Client WHERE active = 1 ORDER BY name'),
-    db.execute('SELECT id, name, code, color, width FROM Product WHERE active = 1 ORDER BY name'),
-    db.execute('SELECT id, lotNumber FROM ImportLot ORDER BY importDate DESC'),
+    pool.query(`SELECT id, name, type FROM "Client" WHERE active = 1 ORDER BY name`),
+    pool.query(`SELECT id, name, code, color, width FROM "Product" WHERE active = 1 ORDER BY name`),
+    pool.query(`SELECT id, "lotNumber" FROM "ImportLot" ORDER BY "importDate" DESC`),
   ]);
 
   const rolls = rollsResult.rows.map(r => ({

@@ -1,22 +1,23 @@
 import { getSession } from '@/lib/session';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 
 export async function GET() {
   const session = await getSession();
   if (!session) return Response.json({ error: 'No autorizado' }, { status: 401 });
 
   try {
-    const result = await db.execute(`
+    const result = await pool.query(`
       SELECT
-        p.id, p.name, p.code, p.color, p.width, p.priceOwner, p.priceB2B, p.priceB2C, p.active,
-        c.id as categoryId, c.name as categoryName,
-        COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) as activeRolls,
-        COALESCE(SUM(CASE WHEN r.status = 'ACTIVE' THEN r.currentMeters END), 0) as totalMeters
-      FROM Product p
-      JOIN Category c ON p.categoryId = c.id
-      LEFT JOIN Roll r ON r.productId = p.id
+        p.id, p.name, p.code, p.color, p.width,
+        p."priceOwner", p."priceB2B", p."priceB2C", p.active,
+        c.id as "categoryId", c.name as "categoryName",
+        COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) as "activeRolls",
+        COALESCE(SUM(CASE WHEN r.status = 'ACTIVE' THEN r."currentMeters" END), 0) as "totalMeters"
+      FROM "Product" p
+      JOIN "Category" c ON p."categoryId" = c.id
+      LEFT JOIN "Roll" r ON r."productId" = p.id
       WHERE p.active = 1
-      GROUP BY p.id
+      GROUP BY p.id, p.name, p.code, p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C", p.active, c.id, c.name
       ORDER BY c.name, p.name
     `);
 

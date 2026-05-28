@@ -1,23 +1,23 @@
 import { getSession } from '@/lib/session';
-import { canSeeFinancials } from '@/lib/auth';
-import db from '@/lib/db';
+import { canSeeFinancials, type Role } from '@/lib/auth';
+import { pool } from '@/lib/db';
 import MovementsClient from './client';
 
 async function getMovements() {
-  const result = await db.execute(`
+  const result = await pool.query(`
     SELECT
-      m.id, m.type, m.meters, m.notes, m.barcodeUsed, m.createdAt,
-      r.rollNumber, r.barcode,
-      p.name as productName, p.code as productCode, p.color, p.priceB2B,
-      u.name as userName,
-      cl.name as clientName, cl.type as clientType
-    FROM Movement m
-    JOIN Roll r ON m.rollId = r.id
-    JOIN Product p ON r.productId = p.id
-    JOIN User u ON m.userId = u.id
-    LEFT JOIN Sale s ON m.saleId = s.id
-    LEFT JOIN Client cl ON s.clientId = cl.id
-    ORDER BY m.createdAt DESC
+      m.id, m.type, m.meters, m.notes, m."barcodeUsed", m."createdAt",
+      r."rollNumber", r.barcode,
+      p.name as "productName", p.code as "productCode", p.color, p."priceB2B",
+      u.name as "userName",
+      cl.name as "clientName", cl.type as "clientType"
+    FROM "Movement" m
+    JOIN "Roll" r ON m."rollId" = r.id
+    JOIN "Product" p ON r."productId" = p.id
+    JOIN "User" u ON m."userId" = u.id
+    LEFT JOIN "Sale" s ON m."saleId" = s.id
+    LEFT JOIN "Client" cl ON s."clientId" = cl.id
+    ORDER BY m."createdAt" DESC
     LIMIT 200
   `);
 
@@ -42,6 +42,6 @@ async function getMovements() {
 export default async function MovementsPage() {
   const session = await getSession();
   const movements = await getMovements();
-  const isOwner = canSeeFinancials(session!.role as 'OWNER' | 'WAREHOUSE');
+  const isOwner = canSeeFinancials(session!.role as Role);
   return <MovementsClient movements={movements} isOwner={isOwner} />;
 }

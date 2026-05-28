@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 
 export async function GET(
   _req: NextRequest,
@@ -12,22 +12,19 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const rollResult = await db.execute({
-      sql: `
-        SELECT
-          r.id, r.rollNumber, r.barcode, r.initialMeters, r.currentMeters,
-          r.location, r.status, r.isRemnant, r.createdAt, r.updatedAt,
-          p.id as productId, p.name as productName, p.code as productCode,
-          p.color, p.width, p.priceOwner, p.priceB2B, p.priceB2C,
-          c.name as categoryName, l.lotNumber
-        FROM Roll r
-        JOIN Product p ON r.productId = p.id
-        JOIN Category c ON p.categoryId = c.id
-        LEFT JOIN ImportLot l ON r.lotId = l.id
-        WHERE r.id = ?
-      `,
-      args: [id],
-    });
+    const rollResult = await pool.query(`
+      SELECT
+        r.id, r."rollNumber", r.barcode, r."initialMeters", r."currentMeters",
+        r.location, r.status, r."isRemnant", r."createdAt", r."updatedAt",
+        p.id as "productId", p.name as "productName", p.code as "productCode",
+        p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C",
+        c.name as "categoryName", l."lotNumber"
+      FROM "Roll" r
+      JOIN "Product" p ON r."productId" = p.id
+      JOIN "Category" c ON p."categoryId" = c.id
+      LEFT JOIN "ImportLot" l ON r."lotId" = l.id
+      WHERE r.id = $1
+    `, [id]);
 
     if (rollResult.rows.length === 0) {
       return Response.json({ error: 'Rollo no encontrado' }, { status: 404 });
@@ -35,21 +32,18 @@ export async function GET(
 
     const r = rollResult.rows[0];
 
-    const movResult = await db.execute({
-      sql: `
-        SELECT m.id, m.type, m.meters, m.notes, m.barcodeUsed, m.createdAt,
-               u.name as userName,
-               cl.name as clientName
-        FROM Movement m
-        JOIN User u ON m.userId = u.id
-        LEFT JOIN Sale s ON m.saleId = s.id
-        LEFT JOIN Client cl ON s.clientId = cl.id
-        WHERE m.rollId = ?
-        ORDER BY m.createdAt DESC
-        LIMIT 50
-      `,
-      args: [id],
-    });
+    const movResult = await pool.query(`
+      SELECT m.id, m.type, m.meters, m.notes, m."barcodeUsed", m."createdAt",
+             u.name as "userName",
+             cl.name as "clientName"
+      FROM "Movement" m
+      JOIN "User" u ON m."userId" = u.id
+      LEFT JOIN "Sale" s ON m."saleId" = s.id
+      LEFT JOIN "Client" cl ON s."clientId" = cl.id
+      WHERE m."rollId" = $1
+      ORDER BY m."createdAt" DESC
+      LIMIT 50
+    `, [id]);
 
     return Response.json({
       id: r.id,

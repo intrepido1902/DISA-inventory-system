@@ -1,375 +1,304 @@
-// setup-db.js — ejecutar con: node setup-db.js
-// Elimina todas las tablas y recrea la base de datos con datos de prueba.
 require('dotenv').config();
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
 
-async function main() {
-  const { createClient } = await import('@libsql/client');
-  const bcryptjs = await import('bcryptjs');
-  const bcrypt = bcryptjs.default ?? bcryptjs;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-  const url = process.env.DATABASE_URL ?? 'file:./dev.db';
-  const authToken = process.env.TURSO_AUTH_TOKEN;
+async function setup() {
+  const client = await pool.connect();
 
-  const db = createClient({ url, ...(authToken ? { authToken } : {}) });
+  try {
+    console.log('Conectando a Supabase...');
 
-  console.log('🗑️  Eliminando tablas existentes...');
-  await db.executeMultiple(`
-    DROP TABLE IF EXISTS AuditLog;
-    DROP TABLE IF EXISTS Movement;
-    DROP TABLE IF EXISTS Sale;
-    DROP TABLE IF EXISTS Roll;
-    DROP TABLE IF EXISTS ImportLot;
-    DROP TABLE IF EXISTS Product;
-    DROP TABLE IF EXISTS Category;
-    DROP TABLE IF EXISTS Client;
-    DROP TABLE IF EXISTS User;
-  `);
+    await client.query(`
+      DROP TABLE IF EXISTS "AuditLog" CASCADE;
+      DROP TABLE IF EXISTS "Movement" CASCADE;
+      DROP TABLE IF EXISTS "Sale" CASCADE;
+      DROP TABLE IF EXISTS "Roll" CASCADE;
+      DROP TABLE IF EXISTS "ImportLot" CASCADE;
+      DROP TABLE IF EXISTS "Product" CASCADE;
+      DROP TABLE IF EXISTS "Category" CASCADE;
+      DROP TABLE IF EXISTS "Client" CASCADE;
+      DROP TABLE IF EXISTS "User" CASCADE;
+    `);
 
-  console.log('📦 Creando tablas...');
-  await db.executeMultiple(`
-    CREATE TABLE User (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','WAREHOUSE')),
-      active INTEGER NOT NULL DEFAULT 1,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL
+    await client.query(`
+      CREATE TABLE "User" (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','WAREHOUSE')),
+        active INTEGER NOT NULL DEFAULT 1,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000,
+        "updatedAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "Category" (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL
+      );
+
+      CREATE TABLE "Product" (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        code TEXT UNIQUE NOT NULL,
+        "categoryId" INTEGER NOT NULL REFERENCES "Category"(id),
+        color TEXT NOT NULL,
+        width INTEGER NOT NULL,
+        "priceOwner" REAL NOT NULL,
+        "priceB2B" REAL NOT NULL,
+        "priceB2C" REAL NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000,
+        "updatedAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "ImportLot" (
+        id SERIAL PRIMARY KEY,
+        "lotNumber" TEXT UNIQUE NOT NULL,
+        "importDate" TEXT NOT NULL,
+        supplier TEXT NOT NULL DEFAULT 'China',
+        notes TEXT,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "Roll" (
+        id SERIAL PRIMARY KEY,
+        "rollNumber" TEXT NOT NULL,
+        barcode TEXT UNIQUE,
+        "productId" INTEGER NOT NULL REFERENCES "Product"(id),
+        "lotId" INTEGER NOT NULL REFERENCES "ImportLot"(id),
+        "initialMeters" REAL NOT NULL,
+        "currentMeters" REAL NOT NULL,
+        location TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','DEPLETED','DEFECTIVE','WRITTEN_OFF')),
+        "isRemnant" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000,
+        "updatedAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "Client" (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('DISTRIBUTOR','DECORATOR')),
+        phone TEXT,
+        email TEXT,
+        notes TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "Sale" (
+        id SERIAL PRIMARY KEY,
+        "clientId" INTEGER NOT NULL REFERENCES "Client"(id),
+        date TEXT NOT NULL,
+        total REAL,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "Movement" (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL CHECK(type IN ('ENTRY','EXIT_FULL','EXIT_PARTIAL','ADJUSTMENT','WRITE_OFF')),
+        "rollId" INTEGER NOT NULL REFERENCES "Roll"(id),
+        meters REAL NOT NULL,
+        "userId" INTEGER NOT NULL REFERENCES "User"(id),
+        "saleId" INTEGER REFERENCES "Sale"(id),
+        notes TEXT,
+        "barcodeUsed" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+
+      CREATE TABLE "AuditLog" (
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER NOT NULL REFERENCES "User"(id),
+        action TEXT NOT NULL,
+        entity TEXT NOT NULL,
+        "entityId" INTEGER NOT NULL,
+        "oldData" TEXT,
+        "newData" TEXT,
+        "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+      );
+    `);
+    console.log('✓ Tablas creadas');
+
+    const ownerPwd = await bcrypt.hash('admin2026', 10);
+    const williamPwd = await bcrypt.hash('william2026', 10);
+    const adminPwd = await bcrypt.hash('admin2026', 10);
+    const warehousePwd = await bcrypt.hash('bodega2026', 10);
+
+    await client.query(`
+      INSERT INTO "User" (email, password, name, role) VALUES
+      ($1, $2, 'Samir Moya', 'OWNER'),
+      ($3, $4, 'William López', 'OWNER'),
+      ($5, $6, 'Ana García', 'ADMIN'),
+      ($7, $8, 'Carlos Pérez', 'WAREHOUSE')
+    `, [
+      'samir@disa.co', ownerPwd,
+      'william@disa.co', williamPwd,
+      'admin@disa.co', adminPwd,
+      'bodega@disa.co', warehousePwd,
+    ]);
+    console.log('✓ Usuarios creados');
+
+    const catResult = await client.query(`
+      INSERT INTO "Category" (name) VALUES ('Velo'), ('Blackout') RETURNING id, name
+    `);
+    const veloId = catResult.rows.find(r => r.name === 'Velo').id;
+    const blackoutId = catResult.rows.find(r => r.name === 'Blackout').id;
+    console.log('✓ Categorías creadas');
+
+    const products = [
+      ['VP-001','Velo Linen','Blanco',280,veloId,38000,45000,55000],
+      ['VP-002','Velo Linen','Crema',280,veloId,38000,45000,55000],
+      ['VP-003','Velo Linen','Blanco',300,veloId,40000,48000,58000],
+      ['VP-004','Velo Sheer','Blanco',280,veloId,35000,42000,52000],
+      ['VP-005','Velo Sheer','Gris',280,veloId,35000,42000,52000],
+      ['VP-006','Velo Sheer','Blanco',300,veloId,37000,44000,54000],
+      ['VP-007','Velo Organza','Blanco',280,veloId,42000,50000,62000],
+      ['VP-008','Velo Organza','Dorado',280,veloId,44000,52000,64000],
+      ['VP-009','Velo Visillo','Blanco',300,veloId,33000,40000,50000],
+      ['VP-010','Velo Visillo','Crema',300,veloId,33000,40000,50000],
+      ['VP-011','Velo Regal','Blanco',280,veloId,39000,46000,56000],
+      ['VP-012','Velo Regal','Plateado',280,veloId,40000,47000,57000],
+      ['VP-013','Velo Soft','Blanco',260,veloId,31000,38000,48000],
+      ['VP-014','Velo Soft','Beige',260,veloId,31000,38000,48000],
+      ['VP-015','Velo Classic','Blanco',280,veloId,34000,41000,51000],
+      ['VP-016','Velo Classic','Crema',280,veloId,34000,41000,51000],
+      ['VP-017','Velo Premium','Blanco',300,veloId,47000,55000,68000],
+      ['BL-001','Blackout Standard','Blanco',280,blackoutId,55000,65000,78000],
+      ['BL-002','Blackout Standard','Gris',280,blackoutId,55000,65000,78000],
+      ['BL-003','Blackout Standard','Negro',280,blackoutId,55000,65000,78000],
+      ['BL-004','Blackout Premium','Blanco',300,blackoutId,63000,75000,90000],
+      ['BL-005','Blackout Premium','Gris Oscuro',300,blackoutId,63000,75000,90000],
+      ['BL-006','Blackout Dimout','Blanco',280,blackoutId,49000,58000,72000],
+      ['BL-007','Blackout Dimout','Beige',280,blackoutId,49000,58000,72000],
+      ['BL-008','Blackout Total','Negro',300,blackoutId,72000,85000,102000],
+    ];
+
+    const productIds = {};
+    for (const [code, name, color, width, catId, priceOwner, priceB2B, priceB2C] of products) {
+      const r = await client.query(
+        `INSERT INTO "Product" (name, code, "categoryId", color, width, "priceOwner", "priceB2B", "priceB2C")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [name, code, catId, color, width, priceOwner, priceB2B, priceB2C]
+      );
+      productIds[code] = r.rows[0].id;
+    }
+    console.log('✓ 25 productos creados');
+
+    const lotResult = await client.query(`
+      INSERT INTO "ImportLot" ("lotNumber", "importDate", supplier, notes) VALUES
+      ('IMP-2024-001','2024-03-15','China','Primera importación 2024'),
+      ('IMP-2024-002','2024-08-20','China','Segunda importación 2024'),
+      ('IMP-2025-001','2025-02-10','China','Primera importación 2025')
+      RETURNING id, "lotNumber"
+    `);
+    const lots = {};
+    lotResult.rows.forEach(r => { lots[r.lotNumber] = r.id; });
+    console.log('✓ 3 lotes creados');
+
+    const rollData = [
+      ['VP-001','IMP-2025-001',5,50,'A-01'],
+      ['VP-002','IMP-2025-001',4,50,'A-02'],
+      ['VP-003','IMP-2024-002',3,50,'A-03'],
+      ['VP-004','IMP-2025-001',6,50,'A-04'],
+      ['VP-005','IMP-2025-001',3,50,'A-05'],
+      ['VP-006','IMP-2024-002',4,50,'A-06'],
+      ['VP-007','IMP-2025-001',3,45,'B-01'],
+      ['VP-008','IMP-2024-002',2,45,'B-02'],
+      ['VP-009','IMP-2025-001',5,50,'B-03'],
+      ['VP-010','IMP-2024-002',3,50,'B-04'],
+      ['VP-011','IMP-2025-001',4,50,'B-05'],
+      ['VP-012','IMP-2024-002',2,50,'B-06'],
+      ['VP-013','IMP-2025-001',4,50,'C-01'],
+      ['VP-014','IMP-2025-001',3,50,'C-02'],
+      ['VP-015','IMP-2024-001',5,50,'C-03'],
+      ['VP-016','IMP-2024-001',3,50,'C-04'],
+      ['VP-017','IMP-2025-001',2,50,'C-05'],
+      ['BL-001','IMP-2025-001',6,50,'D-01'],
+      ['BL-002','IMP-2025-001',4,50,'D-02'],
+      ['BL-003','IMP-2024-002',3,50,'D-03'],
+      ['BL-004','IMP-2025-001',4,50,'D-04'],
+      ['BL-005','IMP-2025-001',3,50,'D-05'],
+      ['BL-006','IMP-2025-001',5,50,'E-01'],
+      ['BL-007','IMP-2024-002',3,50,'E-02'],
+      ['BL-008','IMP-2025-001',3,50,'E-03'],
+    ];
+
+    let rollIdx = 1;
+    const rollIds = [];
+    for (const [productCode, lotNumber, count, meters, location] of rollData) {
+      for (let i = 1; i <= count; i++) {
+        const rollNumber = 'R' + String(rollIdx).padStart(4, '0');
+        const barcode = 'DISA-' + productCode + '-' + String(rollIdx).padStart(4, '0');
+        const currentMeters = (i === 1 && rollIdx % 7 === 0) ? Math.round(meters * 0.6) : meters;
+        const isRemnant = currentMeters <= 10 ? 1 : 0;
+        const r = await client.query(
+          `INSERT INTO "Roll" ("rollNumber", barcode, "productId", "lotId", "initialMeters", "currentMeters", location, "isRemnant")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+          [rollNumber, barcode, productIds[productCode], lots[lotNumber], meters, currentMeters, location, isRemnant]
+        );
+        rollIds.push({ id: r.rows[0].id, productCode });
+        rollIdx++;
+      }
+    }
+    console.log('✓ ' + (rollIdx - 1) + ' rollos creados');
+
+    const clientResult = await client.query(`
+      INSERT INTO "Client" (name, type, phone, email) VALUES
+      ('Decoraciones Martínez','DECORATOR','3001234567','martinez@decoraciones.co'),
+      ('Textiles del Norte SAS','DISTRIBUTOR','3109876543','compras@textilesnorte.co'),
+      ('Interiores & Diseño','DECORATOR','3201112233','info@interiores.co'),
+      ('Casa Bonita Ltda','DISTRIBUTOR','3154445566','pedidos@casabonita.co'),
+      ('Ana Sofía Decoradora','DECORATOR','3007778899',NULL),
+      ('Almacenes Hogar Plus','DISTRIBUTOR','3177654321','hogarplus@gmail.com')
+      RETURNING id
+    `);
+    const clientIds = clientResult.rows.map(r => r.id);
+    console.log('✓ 6 clientes creados');
+
+    const userResult = await client.query(`SELECT id FROM "User" WHERE email = 'samir@disa.co'`);
+    const userId = userResult.rows[0].id;
+    const today = new Date().toISOString().split('T')[0];
+
+    const saleResult = await client.query(
+      `INSERT INTO "Sale" ("clientId", date, total) VALUES ($1,$2,$3) RETURNING id`,
+      [clientIds[0], today, 135000]
+    );
+    await client.query(
+      `INSERT INTO "Movement" (type, "rollId", meters, "userId", "saleId", notes) VALUES ($1,$2,$3,$4,$5,$6)`,
+      ['EXIT_PARTIAL', rollIds[0].id, 3, userId, saleResult.rows[0].id, 'Venta de muestra']
     );
 
-    CREATE TABLE Category (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE
+    const saleResult2 = await client.query(
+      `INSERT INTO "Sale" ("clientId", date, total) VALUES ($1,$2,$3) RETURNING id`,
+      [clientIds[1], today, 225000]
     );
-
-    CREATE TABLE Product (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      code TEXT NOT NULL UNIQUE,
-      categoryId INTEGER NOT NULL,
-      color TEXT NOT NULL,
-      width INTEGER NOT NULL,
-      priceOwner REAL NOT NULL,
-      priceB2B REAL NOT NULL,
-      priceB2C REAL NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL,
-      FOREIGN KEY (categoryId) REFERENCES Category(id)
+    await client.query(
+      `INSERT INTO "Movement" (type, "rollId", meters, "userId", "saleId", notes) VALUES ($1,$2,$3,$4,$5,$6)`,
+      ['EXIT_PARTIAL', rollIds[5].id, 5, userId, saleResult2.rows[0].id, 'Venta de muestra']
     );
+    console.log('✓ Movimientos de muestra creados');
 
-    CREATE TABLE ImportLot (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      lotNumber TEXT NOT NULL UNIQUE,
-      importDate TEXT NOT NULL,
-      supplier TEXT NOT NULL DEFAULT 'China',
-      notes TEXT,
-      createdAt INTEGER NOT NULL
-    );
+    console.log('\n✅ Base de datos Supabase lista');
+    console.log('================================');
+    console.log('CREDENCIALES DE ACCESO:');
+    console.log('  OWNER:     samir@disa.co / admin2026');
+    console.log('  OWNER:     william@disa.co / william2026');
+    console.log('  ADMIN:     admin@disa.co / admin2026');
+    console.log('  WAREHOUSE: bodega@disa.co / bodega2026');
 
-    CREATE TABLE Roll (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      rollNumber TEXT NOT NULL,
-      barcode TEXT UNIQUE,
-      productId INTEGER NOT NULL,
-      lotId INTEGER NOT NULL,
-      initialMeters REAL NOT NULL,
-      currentMeters REAL NOT NULL,
-      location TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','DEPLETED','DEFECTIVE','WRITTEN_OFF')),
-      isRemnant INTEGER NOT NULL DEFAULT 0,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL,
-      FOREIGN KEY (productId) REFERENCES Product(id),
-      FOREIGN KEY (lotId) REFERENCES ImportLot(id)
-    );
-
-    CREATE TABLE Client (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL CHECK(type IN ('DISTRIBUTOR','DECORATOR')),
-      phone TEXT,
-      email TEXT,
-      notes TEXT,
-      active INTEGER NOT NULL DEFAULT 1,
-      createdAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE Sale (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      clientId INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      total REAL,
-      createdAt INTEGER NOT NULL,
-      FOREIGN KEY (clientId) REFERENCES Client(id)
-    );
-
-    CREATE TABLE Movement (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL CHECK(type IN ('ENTRY','EXIT_FULL','EXIT_PARTIAL','ADJUSTMENT','WRITE_OFF')),
-      rollId INTEGER NOT NULL,
-      meters REAL NOT NULL,
-      userId INTEGER NOT NULL,
-      saleId INTEGER,
-      notes TEXT,
-      barcodeUsed INTEGER NOT NULL DEFAULT 0,
-      createdAt INTEGER NOT NULL,
-      FOREIGN KEY (rollId) REFERENCES Roll(id),
-      FOREIGN KEY (userId) REFERENCES User(id),
-      FOREIGN KEY (saleId) REFERENCES Sale(id)
-    );
-
-    CREATE TABLE AuditLog (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId INTEGER NOT NULL,
-      action TEXT NOT NULL,
-      entity TEXT NOT NULL,
-      entityId INTEGER NOT NULL,
-      oldData TEXT,
-      newData TEXT,
-      createdAt INTEGER NOT NULL,
-      FOREIGN KEY (userId) REFERENCES User(id)
-    );
-  `);
-  console.log('✅ Tablas creadas');
-
-  const now = Date.now();
-
-  // ── USERS ─────────────────────────────────────────────────────────────────
-  console.log('👤 Insertando usuarios...');
-  const [hash1, hash2, hash3, hash4] = await Promise.all([
-    bcrypt.hash('admin2026', 10),
-    bcrypt.hash('william2026', 10),
-    bcrypt.hash('admin2026', 10),
-    bcrypt.hash('bodega2026', 10),
-  ]);
-
-  await db.executeMultiple(`
-    INSERT INTO User (email, password, name, role, active, createdAt, updatedAt)
-    VALUES ('samir@disa.co', '${hash1}', 'Samir Moya', 'OWNER', 1, ${now}, ${now});
-
-    INSERT INTO User (email, password, name, role, active, createdAt, updatedAt)
-    VALUES ('william@disa.co', '${hash2}', 'William López', 'OWNER', 1, ${now}, ${now});
-
-    INSERT INTO User (email, password, name, role, active, createdAt, updatedAt)
-    VALUES ('admin@disa.co', '${hash3}', 'Ana García', 'ADMIN', 1, ${now}, ${now});
-
-    INSERT INTO User (email, password, name, role, active, createdAt, updatedAt)
-    VALUES ('bodega@disa.co', '${hash4}', 'Carlos Pérez', 'WAREHOUSE', 1, ${now}, ${now});
-  `);
-
-  // ── CATEGORIES ────────────────────────────────────────────────────────────
-  console.log('🏷️  Insertando categorías...');
-  await db.executeMultiple(`
-    INSERT INTO Category (name) VALUES ('Velo');
-    INSERT INTO Category (name) VALUES ('Blackout');
-  `);
-
-  const catRows = await db.execute('SELECT id, name FROM Category');
-  const veloId = catRows.rows.find(r => r.name === 'Velo').id;
-  const blackoutId = catRows.rows.find(r => r.name === 'Blackout').id;
-
-  // ── PRODUCTS ──────────────────────────────────────────────────────────────
-  console.log('🧵 Insertando 25 productos...');
-  const products = [
-    ['Velo Linen',    'VP-001', veloId,    'Blanco',      280, 17000, 21000, 28000],
-    ['Velo Linen',    'VP-002', veloId,    'Crema',       280, 17000, 21000, 28000],
-    ['Velo Sheer',    'VP-003', veloId,    'Blanco',      260, 15000, 19000, 25000],
-    ['Velo Sheer',    'VP-004', veloId,    'Gris',        260, 15000, 19000, 25000],
-    ['Velo Organza',  'VP-005', veloId,    'Blanco',      300, 22000, 27000, 35000],
-    ['Velo Organza',  'VP-006', veloId,    'Dorado',      300, 23000, 28000, 36000],
-    ['Velo Visillo',  'VP-007', veloId,    'Blanco',      280, 16000, 20000, 26000],
-    ['Velo Visillo',  'VP-008', veloId,    'Crema',       280, 16000, 20000, 26000],
-    ['Velo Regal',    'VP-009', veloId,    'Blanco',      300, 24000, 30000, 38000],
-    ['Velo Regal',    'VP-010', veloId,    'Plateado',    300, 25000, 31000, 39000],
-    ['Velo Soft',     'VP-011', veloId,    'Blanco',      260, 14000, 17000, 22000],
-    ['Velo Soft',     'VP-012', veloId,    'Beige',       260, 14000, 17000, 22000],
-    ['Velo Classic',  'VP-013', veloId,    'Blanco',      280, 18000, 22000, 29000],
-    ['Velo Classic',  'VP-014', veloId,    'Crema',       280, 18000, 22000, 29000],
-    ['Velo Premium',  'VP-015', veloId,    'Blanco',      300, 26000, 32000, 40000],
-    ['Velo Natural',  'VP-016', veloId,    'Crema',       260, 15500, 19000, 24000],
-    ['Velo Brisa',    'VP-017', veloId,    'Blanco',      280, 16500, 20000, 26000],
-    ['Blackout Standard', 'BL-001', blackoutId, 'Blanco',      280, 30000, 37000, 46000],
-    ['Blackout Standard', 'BL-002', blackoutId, 'Gris',        280, 30000, 37000, 46000],
-    ['Blackout Standard', 'BL-003', blackoutId, 'Negro',       280, 31000, 38000, 47000],
-    ['Blackout Premium',  'BL-004', blackoutId, 'Blanco',      300, 40000, 49000, 60000],
-    ['Blackout Premium',  'BL-005', blackoutId, 'Gris Oscuro', 300, 42000, 51000, 63000],
-    ['Blackout Dimout',   'BL-006', blackoutId, 'Blanco',      280, 35000, 43000, 54000],
-    ['Blackout Dimout',   'BL-007', blackoutId, 'Beige',       280, 35000, 43000, 54000],
-    ['Blackout Total',    'BL-008', blackoutId, 'Negro',       260, 38000, 46000, 57000],
-  ];
-
-  for (const [name, code, categoryId, color, width, priceOwner, priceB2B, priceB2C] of products) {
-    await db.execute({
-      sql: `INSERT INTO Product (name, code, categoryId, color, width, priceOwner, priceB2B, priceB2C, active, createdAt, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-      args: [name, code, categoryId, color, width, priceOwner, priceB2B, priceB2C, now, now],
-    });
+  } finally {
+    client.release();
+    await pool.end();
   }
-
-  const prodRows = await db.execute('SELECT id, code FROM Product ORDER BY id');
-  const productMap = {};
-  for (const row of prodRows.rows) productMap[row.code] = row.id;
-
-  // ── IMPORT LOTS ───────────────────────────────────────────────────────────
-  console.log('📋 Insertando lotes...');
-  await db.executeMultiple(`
-    INSERT INTO ImportLot (lotNumber, importDate, supplier, notes, createdAt)
-    VALUES ('IMP-2024-001', '2024-03-15', 'China', 'Primer lote 2024 - Guangzhou Textile', ${now});
-
-    INSERT INTO ImportLot (lotNumber, importDate, supplier, notes, createdAt)
-    VALUES ('IMP-2024-002', '2024-08-20', 'China', 'Segundo lote 2024 - Shanghai Fabrics Co.', ${now});
-
-    INSERT INTO ImportLot (lotNumber, importDate, supplier, notes, createdAt)
-    VALUES ('IMP-2025-001', '2025-02-10', 'China', 'Primer lote 2025 - Guangzhou Textile', ${now});
-  `);
-
-  const lotRows = await db.execute('SELECT id, lotNumber FROM ImportLot ORDER BY id');
-  const lot1 = lotRows.rows[0].id;
-  const lot2 = lotRows.rows[1].id;
-  const lot3 = lotRows.rows[2].id;
-  const lotPrefix = { [lot1]: '240315', [lot2]: '240820', [lot3]: '250210' };
-
-  // ── ROLLS (~83 rollos) ────────────────────────────────────────────────────
-  console.log('🧶 Insertando rollos (~83)...');
-  const rollData = [
-    ['VP-001', lot1, '001', 150, 150, 'A-01', 0], ['VP-001', lot1, '002', 130, 105, 'A-01', 0],
-    ['VP-001', lot2, '003', 160, 160, 'A-02', 0], ['VP-001', lot2, '004', 120,   8, 'A-02', 1],
-    ['VP-002', lot1, '005', 140, 140, 'A-03', 0], ['VP-002', lot2, '006', 155,  92, 'A-03', 0],
-    ['VP-002', lot3, '007', 170, 170, 'A-04', 0],
-    ['VP-003', lot1, '008', 130, 130, 'A-04', 0], ['VP-003', lot1, '009', 145,  78, 'A-05', 0],
-    ['VP-003', lot2, '010', 160, 160, 'A-05', 0], ['VP-003', lot3, '011', 110,   5, 'A-06', 1],
-    ['VP-004', lot1, '012', 140, 118, 'A-06', 0], ['VP-004', lot2, '013', 150, 150, 'A-07', 0],
-    ['VP-004', lot3, '014', 165, 165, 'A-07', 0],
-    ['VP-005', lot1, '015', 120, 120, 'A-08', 0], ['VP-005', lot2, '016', 135,  60, 'A-08', 0],
-    ['VP-005', lot3, '017', 150, 150, 'A-09', 0],
-    ['VP-006', lot1, '018', 130,  95, 'A-09', 0], ['VP-006', lot2, '019', 140, 140, 'A-10', 0],
-    ['VP-006', lot3, '020', 125, 125, 'A-10', 0],
-    ['VP-007', lot1, '021', 155, 155, 'B-01', 0], ['VP-007', lot1, '022', 130,  45, 'B-01', 0],
-    ['VP-007', lot2, '023', 165, 165, 'B-02', 0], ['VP-007', lot3, '024', 145,   7, 'B-02', 1],
-    ['VP-008', lot1, '025', 150, 115, 'B-03', 0], ['VP-008', lot2, '026', 140, 140, 'B-03', 0],
-    ['VP-008', lot3, '027', 160, 160, 'B-04', 0],
-    ['VP-009', lot1, '028', 120, 120, 'B-04', 0], ['VP-009', lot2, '029', 135,  80, 'B-05', 0],
-    ['VP-009', lot2, '030', 150, 150, 'B-05', 0], ['VP-009', lot3, '031', 110,   6, 'B-06', 1],
-    ['VP-010', lot1, '032', 130,  98, 'B-06', 0], ['VP-010', lot2, '033', 145, 145, 'B-07', 0],
-    ['VP-010', lot2, '034', 160, 160, 'B-07', 0], ['VP-010', lot3, '035', 120, 120, 'B-08', 0],
-    ['VP-011', lot2, '036', 140, 140, 'B-08', 0], ['VP-011', lot2, '037', 155,  70, 'B-09', 0],
-    ['VP-011', lot3, '038', 130, 130, 'B-09', 0],
-    ['VP-012', lot2, '039', 135, 110, 'B-10', 0], ['VP-012', lot3, '040', 150, 150, 'B-10', 0],
-    ['VP-012', lot3, '041', 145, 145, 'C-01', 0],
-    ['VP-013', lot1, '042', 160, 160, 'C-01', 0], ['VP-013', lot2, '043', 130,  55, 'C-02', 0],
-    ['VP-013', lot3, '044', 155, 155, 'C-02', 0], ['VP-013', lot3, '045', 140,   9, 'C-03', 1],
-    ['VP-014', lot1, '046', 150, 118, 'C-03', 0], ['VP-014', lot2, '047', 135, 135, 'C-04', 0],
-    ['VP-014', lot3, '048', 165, 165, 'C-04', 0], ['VP-014', lot3, '049', 120, 120, 'C-05', 0],
-    ['VP-015', lot1, '050', 140, 140, 'C-05', 0], ['VP-015', lot1, '051', 155,  88, 'A-11', 0],
-    ['VP-015', lot2, '052', 170, 170, 'A-11', 0], ['VP-015', lot3, '053', 130, 130, 'A-12', 0],
-    ['VP-015', lot3, '054', 145,   4, 'A-12', 1],
-    ['VP-016', lot2, '055', 150, 122, 'A-13', 0], ['VP-016', lot3, '056', 160, 160, 'A-13', 0],
-    ['VP-017', lot2, '057', 145,  95, 'A-14', 0], ['VP-017', lot3, '058', 155, 155, 'A-14', 0],
-    ['BL-001', lot1, '059', 130, 130, 'A-15', 0], ['BL-001', lot2, '060', 145,  75, 'B-11', 0],
-    ['BL-001', lot3, '061', 160, 160, 'B-11', 0], ['BL-001', lot3, '062', 120,   8, 'B-12', 1],
-    ['BL-002', lot1, '063', 135, 110, 'B-12', 0], ['BL-002', lot2, '064', 150, 150, 'C-06', 0],
-    ['BL-002', lot3, '065', 140, 140, 'C-06', 0],
-    ['BL-003', lot2, '066', 125,  88, 'C-07', 0], ['BL-003', lot3, '067', 140, 140, 'C-07', 0],
-    ['BL-003', lot3, '068', 155, 155, 'C-08', 0],
-    ['BL-004', lot1, '069', 120, 120, 'C-08', 0], ['BL-004', lot2, '070', 135,  62, 'A-01', 0],
-    ['BL-004', lot3, '071', 150, 150, 'A-02', 0], ['BL-004', lot3, '072', 110,   6, 'A-03', 1],
-    ['BL-005', lot2, '073', 130,  95, 'A-04', 0], ['BL-005', lot3, '074', 145, 145, 'A-05', 0],
-    ['BL-005', lot3, '075', 125, 125, 'A-06', 0],
-    ['BL-006', lot1, '076', 140, 140, 'A-07', 0], ['BL-006', lot2, '077', 155,  45, 'A-08', 0],
-    ['BL-006', lot3, '078', 165, 165, 'A-09', 0], ['BL-006', lot3, '079', 130,   9, 'A-10', 1],
-    ['BL-007', lot2, '080', 145, 120, 'B-01', 0], ['BL-007', lot3, '081', 155, 155, 'B-02', 0],
-    ['BL-008', lot2, '082', 130,  85, 'B-03', 0], ['BL-008', lot3, '083', 145, 145, 'B-04', 0],
-  ];
-
-  for (const [code, lotId, suffix, initial, current, location, isRemnant] of rollData) {
-    const productId = productMap[code];
-    const rollNumber = `CH-${lotPrefix[lotId]}-${suffix}`;
-    const barcode = `DISA-${code}-${suffix}`;
-    const status = current === 0 ? 'DEPLETED' : 'ACTIVE';
-    await db.execute({
-      sql: `INSERT INTO Roll (rollNumber, barcode, productId, lotId, initialMeters, currentMeters, location, status, isRemnant, createdAt, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [rollNumber, barcode, productId, lotId, initial, current, location, status, isRemnant, now, now],
-    });
-  }
-
-  // ── CLIENTS ───────────────────────────────────────────────────────────────
-  console.log('🏢 Insertando clientes...');
-  const clients = [
-    ['Textiles del Norte SAS',      'DISTRIBUTOR', '3001234567', 'compras@textilesnorte.co',  'Cliente mayorista Bogotá'],
-    ['Casa Decoración Bogotá',      'DECORATOR',   '3109876543', 'info@casadecobogota.co',    'Decoradora estrato 5-6'],
-    ['Distribuidora Medellín Telas','DISTRIBUTOR', '3207654321', 'ventas@distmedtelas.co',    'Distribuidor zona Antioquia'],
-    ['La Villa Decoradora',         'DECORATOR',   '3156789012', 'lavilla@decoradora.co',     null],
-    ['Importaciones Cali Telas',    'DISTRIBUTOR', '3012345678', 'cali@importaciones.co',     'Distribuidor zona Pacífico'],
-    ['Diseño Interior Barranquilla','DECORATOR',   '3189012345', 'info@dibq.co',              'Proyectos hoteleros'],
-  ];
-
-  for (const [name, type, phone, email, notes] of clients) {
-    await db.execute({
-      sql: `INSERT INTO Client (name, type, phone, email, notes, active, createdAt) VALUES (?, ?, ?, ?, ?, 1, ?)`,
-      args: [name, type, phone, email, notes, now],
-    });
-  }
-
-  // ── SAMPLE MOVEMENTS (today) ──────────────────────────────────────────────
-  console.log('📊 Insertando movimientos de muestra...');
-  const rollRows  = await db.execute('SELECT id, productId FROM Roll ORDER BY id LIMIT 6');
-  const clientRows = await db.execute('SELECT id FROM Client ORDER BY id LIMIT 3');
-  const userRow   = await db.execute('SELECT id FROM User ORDER BY id LIMIT 1');
-  const userId    = userRow.rows[0].id;
-  const today     = new Date().toISOString().split('T')[0];
-
-  const sampleExits = [
-    { rollIdx: 0, clientIdx: 0, meters: 25, type: 'EXIT_PARTIAL', notes: 'Pedido 001' },
-    { rollIdx: 1, clientIdx: 1, meters: 40, type: 'EXIT_PARTIAL', notes: 'Pedido 002' },
-    { rollIdx: 2, clientIdx: 2, meters: 15, type: 'EXIT_PARTIAL', notes: 'Pedido 003' },
-  ];
-
-  for (let i = 0; i < sampleExits.length; i++) {
-    const exit = sampleExits[i];
-    if (exit.rollIdx >= rollRows.rows.length) continue;
-    const rollId = rollRows.rows[exit.rollIdx].id;
-    const productId = rollRows.rows[exit.rollIdx].productId;
-    const clientId = clientRows.rows[exit.clientIdx % clientRows.rows.length].id;
-
-    // Get priceB2B for this product
-    const priceRow = await db.execute({ sql: 'SELECT priceB2B FROM Product WHERE id = ?', args: [productId] });
-    const priceB2B = priceRow.rows[0]?.priceB2B ?? 0;
-    const total = exit.meters * priceB2B;
-
-    const saleResult = await db.execute({
-      sql: `INSERT INTO Sale (clientId, date, total, createdAt) VALUES (?, ?, ?, ?)`,
-      args: [clientId, today, total, now - (i * 3600000)],
-    });
-    await db.execute({
-      sql: `INSERT INTO Movement (type, rollId, meters, userId, saleId, notes, barcodeUsed, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-      args: [exit.type, rollId, exit.meters, userId, saleResult.lastInsertRowid, exit.notes, now - (i * 3600000)],
-    });
-  }
-
-  // Entry sample
-  const entryRoll = rollRows.rows[0]?.id;
-  if (entryRoll) {
-    await db.execute({
-      sql: `INSERT INTO Movement (type, rollId, meters, userId, saleId, notes, barcodeUsed, createdAt)
-            VALUES ('ENTRY', ?, 150, ?, null, 'Recepción lote IMP-2025-001', 0, ?)`,
-      args: [entryRoll, userId, now - 86400000],
-    });
-  }
-
-  console.log('\n✅ Base de datos lista!\n');
-  console.log('👤 Usuarios:');
-  console.log('   samir@disa.co    / admin2026   → OWNER   (Samir Moya)');
-  console.log('   william@disa.co  / william2026 → OWNER   (William López)');
-  console.log('   admin@disa.co    / admin2026   → ADMIN   (Ana García)');
-  console.log('   bodega@disa.co   / bodega2026  → WAREHOUSE (Carlos Pérez)');
-  console.log('\n🚀 Ejecuta: npm run dev\n');
 }
 
-main().catch(err => {
-  console.error('❌ Error durante el setup:', err);
+setup().catch(err => {
+  console.error('Error:', err.message);
   process.exit(1);
 });

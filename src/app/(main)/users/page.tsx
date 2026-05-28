@@ -1,10 +1,10 @@
 import { getSession } from '@/lib/session';
 import { redirect } from 'next/navigation';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 
 async function getUsers() {
-  const result = await db.execute(
-    'SELECT id, email, name, role, active, createdAt FROM User ORDER BY createdAt ASC'
+  const result = await pool.query(
+    `SELECT id, email, name, role, active, "createdAt" FROM "User" ORDER BY "createdAt" ASC`
   );
   return result.rows;
 }

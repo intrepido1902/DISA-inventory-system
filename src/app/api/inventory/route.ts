@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
-import db from '@/lib/db';
+import { pool } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -12,66 +12,62 @@ export async function GET(request: NextRequest) {
   const category = searchParams.get('category') ?? '';
   const isRemnant = searchParams.get('isRemnant') ?? '';
 
+  const params: (string | number)[] = [];
+  function p(val: string | number) {
+    params.push(val);
+    return `$${params.length}`;
+  }
+
   let sql = `
     SELECT
-      r.id, r.rollNumber, r.barcode, r.initialMeters, r.currentMeters,
-      r.location, r.status, r.isRemnant, r.createdAt, r.updatedAt,
-      p.id as productId, p.name as productName, p.code as productCode,
-      p.color, p.width, p.priceOwner, p.priceB2B, p.priceB2C,
-      c.id as categoryId, c.name as categoryName,
-      l.id as lotId, l.lotNumber
-    FROM Roll r
-    JOIN Product p ON r.productId = p.id
-    JOIN Category c ON p.categoryId = c.id
-    LEFT JOIN ImportLot l ON r.lotId = l.id
+      r.id, r."rollNumber", r.barcode, r."initialMeters", r."currentMeters",
+      r.location, r.status, r."isRemnant", r."createdAt", r."updatedAt",
+      p.id as "productId", p.name as "productName", p.code as "productCode",
+      p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C",
+      c.id as "categoryId", c.name as "categoryName",
+      l.id as "lotId", l."lotNumber"
+    FROM "Roll" r
+    JOIN "Product" p ON r."productId" = p.id
+    JOIN "Category" c ON p."categoryId" = c.id
+    LEFT JOIN "ImportLot" l ON r."lotId" = l.id
     WHERE 1=1
   `;
-  const args: (string | number)[] = [];
 
-  if (status) {
-    sql += ' AND r.status = ?';
-    args.push(status);
-  }
-  if (category) {
-    sql += ' AND c.name = ?';
-    args.push(category);
-  }
-  if (isRemnant === 'true') {
-    sql += ' AND r.isRemnant = 1';
-  }
+  if (status) sql += ` AND r.status = ${p(status)}`;
+  if (category) sql += ` AND c.name = ${p(category)}`;
+  if (isRemnant === 'true') sql += ` AND r."isRemnant" = 1`;
   if (search) {
-    sql += ' AND (r.rollNumber LIKE ? OR r.barcode LIKE ? OR p.name LIKE ? OR p.color LIKE ?)';
     const like = `%${search}%`;
-    args.push(like, like, like, like);
+    sql += ` AND (r."rollNumber" LIKE ${p(like)} OR r.barcode LIKE ${p(like)} OR p.name LIKE ${p(like)} OR p.color LIKE ${p(like)})`;
   }
 
-  sql += ' ORDER BY r.status ASC, r.updatedAt DESC';
+  sql += ` ORDER BY r.status ASC, r."updatedAt" DESC`;
 
   try {
-    const result = await db.execute({ sql, args });
-    const rolls = result.rows.map(r => ({
-      id: r.id,
-      rollNumber: r.rollNumber,
-      barcode: r.barcode,
-      initialMeters: r.initialMeters,
-      currentMeters: r.currentMeters,
-      location: r.location,
-      status: r.status,
-      isRemnant: r.isRemnant === 1,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
+    const result = await pool.query(sql, params);
+    const rolls = result.rows.map(row => ({
+      id: row.id,
+      rollNumber: row.rollNumber,
+      barcode: row.barcode,
+      initialMeters: row.initialMeters,
+      currentMeters: row.currentMeters,
+      location: row.location,
+      status: row.status,
+      isRemnant: row.isRemnant === 1,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
       product: {
-        id: r.productId,
-        name: r.productName,
-        code: r.productCode,
-        color: r.color,
-        width: r.width,
-        priceOwner: r.priceOwner,
-        priceB2B: r.priceB2B,
-        priceB2C: r.priceB2C,
+        id: row.productId,
+        name: row.productName,
+        code: row.productCode,
+        color: row.color,
+        width: row.width,
+        priceOwner: row.priceOwner,
+        priceB2B: row.priceB2B,
+        priceB2C: row.priceB2C,
       },
-      category: { id: r.categoryId, name: r.categoryName },
-      lot: { id: r.lotId, lotNumber: r.lotNumber },
+      category: { id: row.categoryId, name: row.categoryName },
+      lot: { id: row.lotId, lotNumber: row.lotNumber },
     }));
     return Response.json(rolls);
   } catch (err) {
