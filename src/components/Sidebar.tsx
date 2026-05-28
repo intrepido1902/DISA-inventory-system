@@ -20,7 +20,7 @@ const NAV = [
   { href: '/movements',              icon: '↕', label: 'Movimientos',    roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
   { href: '/clients',                icon: '◎', label: 'Clientes',       roles: ['OWNER', 'ADMIN'] },
   { href: '/users',                  icon: '◯', label: 'Usuarios',       roles: ['OWNER'] },
-  { href: '/audit',                  icon: '◩', label: 'Auditoría',      roles: ['OWNER'] },
+  { href: '/audit',                  icon: '◩', label: 'Auditoría',      roles: ['OWNER', 'ADMIN'] },
 ];
 
 const ROLE_LABEL: Record<string, string> = {

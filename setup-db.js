@@ -235,7 +235,7 @@ async function setup() {
       for (let i = 1; i <= count; i++) {
         const rollNumber = 'R' + String(rollIdx).padStart(4, '0');
         const barcode = 'DISA-' + productCode + '-' + String(rollIdx).padStart(4, '0');
-        const currentMeters = (i === 1 && rollIdx % 7 === 0) ? Math.round(meters * 0.6) : meters;
+        const currentMeters = (i === 1 && rollIdx % 7 === 0) ? Math.round(meters * 0.12) : meters;
         const isRemnant = currentMeters <= 10 ? 1 : 0;
         const r = await client.query(
           `INSERT INTO "Roll" ("rollNumber", barcode, "productId", "lotId", "initialMeters", "currentMeters", location, "isRemnant")

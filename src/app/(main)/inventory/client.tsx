@@ -90,6 +90,7 @@ export default function InventoryClient({
   const [exitNotes, setExitNotes] = useState('');
   const [exitLoading, setExitLoading] = useState(false);
   const [remnantWarning, setRemnantWarning] = useState<Roll[]>([]);
+  const [exitPrevStep, setExitPrevStep] = useState<ExitStep>('roll');
 
   // Entry modal
   const [showEntry, setShowEntry] = useState(false);
@@ -103,7 +104,7 @@ export default function InventoryClient({
 
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const canManage = userRole === 'OWNER';
+  const canManage = userRole === 'OWNER' || userRole === 'ADMIN';
   const isOwner = userRole === 'OWNER';
 
   // Rolls for current tab
@@ -151,6 +152,7 @@ export default function InventoryClient({
   function openExitFlow(preselectedRoll?: Roll) {
     setShowExit(true);
     setExitStep(preselectedRoll ? 'confirm' : 'product');
+    setExitPrevStep('roll');
     setExitProductId(preselectedRoll ? String(preselectedRoll.product.id) : '');
     setExitRoll(preselectedRoll ?? null);
     setExitType('EXIT_PARTIAL');
@@ -163,6 +165,7 @@ export default function InventoryClient({
   function closeExit() {
     setShowExit(false);
     setExitStep('product');
+    setExitPrevStep('roll');
     setExitProductId('');
     setExitRoll(null);
     setExitMeters('');
@@ -570,9 +573,9 @@ export default function InventoryClient({
                     <button
                       type="button"
                       onClick={() => {
-                        // Pre-select the smallest remnant
                         const smallest = remnantWarning[0];
                         setExitRoll(smallest);
+                        setExitPrevStep('remnant-check');
                         setExitStep('confirm');
                       }}
                       className="flex-1 bg-amber-500 text-white rounded px-4 py-2 text-sm font-medium hover:bg-amber-600"
@@ -601,7 +604,7 @@ export default function InventoryClient({
                       <button
                         key={r.id}
                         type="button"
-                        onClick={() => { setExitRoll(r); setExitStep('confirm'); }}
+                        onClick={() => { setExitRoll(r); setExitPrevStep('roll'); setExitStep('confirm'); }}
                         className={`w-full flex items-center justify-between border rounded-lg px-4 py-3 text-sm hover:border-gray-400 transition-colors ${
                           exitRoll?.id === r.id ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'
                         }`}
@@ -737,7 +740,7 @@ export default function InventoryClient({
                   <div className="flex gap-3 pt-1">
                     <button
                       type="button"
-                      onClick={() => setExitStep('roll')}
+                      onClick={() => setExitStep(exitPrevStep)}
                       className="border border-[#E5E5E5] rounded px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
                     >
                       ← Volver
