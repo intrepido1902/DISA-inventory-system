@@ -1,39 +1,38 @@
 import { getSession } from '@/lib/session';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 
 export async function GET() {
   const session = await getSession();
   if (!session) return Response.json({ error: 'No autorizado' }, { status: 401 });
 
   try {
-    const result = await pool.query(`
-      SELECT
-        p.id, p.name, p.code, p.color, p.width,
-        p."priceOwner", p."priceB2B", p."priceB2C", p.active,
-        c.id as "categoryId", c.name as "categoryName",
-        COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) as "activeRolls",
-        COALESCE(SUM(CASE WHEN r.status = 'ACTIVE' THEN r."currentMeters" END), 0) as "totalMeters"
-      FROM "Product" p
-      JOIN "Category" c ON p."categoryId" = c.id
-      LEFT JOIN "Roll" r ON r."productId" = p.id
-      WHERE p.active = 1
-      GROUP BY p.id, p.name, p.code, p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C", p.active, c.id, c.name
-      ORDER BY c.name, p.name
-    `);
+    const [productsRes, rollsRes] = await Promise.all([
+      db.from('Product').select('id, name, code, color, width, priceOwner, priceB2B, priceB2C, active, category:categoryId(id, name)').eq('active', 1).order('name', { ascending: true }),
+      db.from('Roll').select('productId, currentMeters, status').eq('status', 'ACTIVE'),
+    ]);
 
-    return Response.json(result.rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      code: r.code,
-      color: r.color,
-      width: r.width,
-      priceOwner: r.priceOwner,
-      priceB2B: r.priceB2B,
-      priceB2C: r.priceB2C,
-      active: r.active,
-      category: { id: r.categoryId, name: r.categoryName },
-      activeRolls: r.activeRolls,
-      totalMeters: r.totalMeters,
+    const products = (productsRes.data ?? []) as any[];
+    const rolls = (rollsRes.data ?? []) as any[];
+
+    const rollStats = new Map<number, { count: number; meters: number }>();
+    for (const r of rolls) {
+      const prev = rollStats.get(r.productId) ?? { count: 0, meters: 0 };
+      rollStats.set(r.productId, { count: prev.count + 1, meters: prev.meters + (r.currentMeters as number) });
+    }
+
+    return Response.json(products.map(p => ({
+      id: p.id,
+      name: p.name,
+      code: p.code,
+      color: p.color,
+      width: p.width,
+      priceOwner: p.priceOwner,
+      priceB2B: p.priceB2B,
+      priceB2C: p.priceB2C,
+      active: p.active,
+      category: { id: p.category?.id, name: p.category?.name },
+      activeRolls: rollStats.get(p.id)?.count ?? 0,
+      totalMeters: rollStats.get(p.id)?.meters ?? 0,
     })));
   } catch (err) {
     console.error('GET /api/catalog/products error:', err);

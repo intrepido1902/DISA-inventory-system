@@ -1,41 +1,31 @@
 import { getSession } from '@/lib/session';
 import { canSeeFinancials, type Role } from '@/lib/auth';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 import MovementsClient from './client';
 
 async function getMovements() {
-  const result = await pool.query(`
-    SELECT
-      m.id, m.type, m.meters, m.notes, m."barcodeUsed", m."createdAt",
-      r."rollNumber", r.barcode,
-      p.name as "productName", p.code as "productCode", p.color, p."priceB2B",
-      u.name as "userName",
-      cl.name as "clientName", cl.type as "clientType"
-    FROM "Movement" m
-    JOIN "Roll" r ON m."rollId" = r.id
-    JOIN "Product" p ON r."productId" = p.id
-    JOIN "User" u ON m."userId" = u.id
-    LEFT JOIN "Sale" s ON m."saleId" = s.id
-    LEFT JOIN "Client" cl ON s."clientId" = cl.id
-    ORDER BY m."createdAt" DESC
-    LIMIT 200
-  `);
+  const { data } = await db.from('Movement').select(`
+    id, type, meters, notes, barcodeUsed, createdAt,
+    roll:rollId(rollNumber, barcode, product:productId(name, code, color, priceB2B)),
+    user:userId(name),
+    sale:saleId(client:clientId(name, type))
+  `).order('createdAt', { ascending: false }).limit(200);
 
-  return result.rows.map(r => ({
-    id: r.id as number,
-    type: r.type as string,
-    meters: r.meters as number,
-    notes: r.notes as string | null,
-    barcodeUsed: r.barcodeUsed === 1,
-    createdAt: r.createdAt as number,
-    rollNumber: r.rollNumber as string,
-    productName: r.productName as string,
-    productCode: r.productCode as string,
-    color: r.color as string,
-    priceB2B: r.priceB2B as number,
-    userName: r.userName as string,
-    clientName: r.clientName as string | null,
-    clientType: r.clientType as string | null,
+  return (data ?? []).map((m: any) => ({
+    id: m.id as number,
+    type: m.type as string,
+    meters: m.meters as number,
+    notes: m.notes as string | null,
+    barcodeUsed: Boolean(m.barcodeUsed),
+    createdAt: m.createdAt as number,
+    rollNumber: m.roll?.rollNumber as string ?? '',
+    productName: m.roll?.product?.name as string ?? '',
+    productCode: m.roll?.product?.code as string ?? '',
+    color: m.roll?.product?.color as string ?? '',
+    priceB2B: m.roll?.product?.priceB2B as number ?? 0,
+    userName: m.user?.name as string ?? '',
+    clientName: m.sale?.client?.name as string | null ?? null,
+    clientType: m.sale?.client?.type as string | null ?? null,
   }));
 }
 

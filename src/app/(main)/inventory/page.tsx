@@ -1,29 +1,23 @@
 import { getSession } from '@/lib/session';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 import InventoryClient from './client';
 
 async function getInventoryData() {
-  const [rollsResult, clientsResult, productsResult, lotsResult] = await Promise.all([
-    pool.query(`
-      SELECT
-        r.id, r."rollNumber", r.barcode, r."initialMeters", r."currentMeters",
-        r.location, r.status, r."isRemnant", r."updatedAt",
-        p.id as "productId", p.name as "productName", p.code as "productCode",
-        p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C",
-        c.id as "categoryId", c.name as "categoryName",
-        l.id as "lotId", l."lotNumber"
-      FROM "Roll" r
-      JOIN "Product" p ON r."productId" = p.id
-      JOIN "Category" c ON p."categoryId" = c.id
-      LEFT JOIN "ImportLot" l ON r."lotId" = l.id
-      ORDER BY r.status ASC, r."updatedAt" DESC
-    `),
-    pool.query(`SELECT id, name, type FROM "Client" WHERE active = 1 ORDER BY name`),
-    pool.query(`SELECT id, name, code, color, width FROM "Product" WHERE active = 1 ORDER BY name`),
-    pool.query(`SELECT id, "lotNumber" FROM "ImportLot" ORDER BY "importDate" DESC`),
+  const [rollsRes, clientsRes, productsRes, lotsRes] = await Promise.all([
+    db.from('Roll').select(`
+      id, rollNumber, barcode, initialMeters, currentMeters,
+      location, status, isRemnant, updatedAt,
+      product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
+        category:categoryId(id, name)
+      ),
+      lot:lotId(id, lotNumber)
+    `).order('status', { ascending: true }).order('updatedAt', { ascending: false }),
+    db.from('Client').select('id, name, type').eq('active', 1).order('name', { ascending: true }),
+    db.from('Product').select('id, name, code, color, width').eq('active', 1).order('name', { ascending: true }),
+    db.from('ImportLot').select('id, lotNumber').order('importDate', { ascending: false }),
   ]);
 
-  const rolls = rollsResult.rows.map(r => ({
+  const rolls = (rollsRes.data ?? []).map((r: any) => ({
     id: r.id as number,
     rollNumber: r.rollNumber as string,
     barcode: r.barcode as string | null,
@@ -31,27 +25,33 @@ async function getInventoryData() {
     currentMeters: r.currentMeters as number,
     location: r.location as string,
     status: r.status as string,
-    isRemnant: r.isRemnant === 1,
+    isRemnant: Boolean(r.isRemnant),
     updatedAt: r.updatedAt as number,
     product: {
-      id: r.productId as number,
-      name: r.productName as string,
-      code: r.productCode as string,
-      color: r.color as string,
-      width: r.width as number,
-      priceOwner: r.priceOwner as number,
-      priceB2B: r.priceB2B as number,
-      priceB2C: r.priceB2C as number,
+      id: r.product?.id as number,
+      name: r.product?.name as string,
+      code: r.product?.code as string,
+      color: r.product?.color as string,
+      width: r.product?.width as number,
+      priceOwner: r.product?.priceOwner as number,
+      priceB2B: r.product?.priceB2B as number,
+      priceB2C: r.product?.priceB2C as number,
     },
-    category: { id: r.categoryId as number, name: r.categoryName as string },
-    lot: { id: r.lotId as number | null, lotNumber: r.lotNumber as string | null },
+    category: {
+      id: r.product?.category?.id as number,
+      name: r.product?.category?.name as string,
+    },
+    lot: {
+      id: r.lot?.id as number | null ?? null,
+      lotNumber: r.lot?.lotNumber as string | null ?? null,
+    },
   }));
 
   return {
     rolls,
-    clients: clientsResult.rows.map(r => ({ id: r.id as number, name: r.name as string, type: r.type as string })),
-    products: productsResult.rows.map(r => ({ id: r.id as number, name: r.name as string, code: r.code as string, color: r.color as string, width: r.width as number })),
-    lots: lotsResult.rows.map(r => ({ id: r.id as number, lotNumber: r.lotNumber as string })),
+    clients: (clientsRes.data ?? []).map((r: any) => ({ id: r.id as number, name: r.name as string, type: r.type as string })),
+    products: (productsRes.data ?? []).map((r: any) => ({ id: r.id as number, name: r.name as string, code: r.code as string, color: r.color as string, width: r.width as number })),
+    lots: (lotsRes.data ?? []).map((r: any) => ({ id: r.id as number, lotNumber: r.lotNumber as string })),
   };
 }
 

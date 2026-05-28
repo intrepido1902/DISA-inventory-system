@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { pool } from './db';
+import { db } from './db';
 
 export type Role = 'OWNER' | 'ADMIN' | 'WAREHOUSE';
 
@@ -12,41 +12,43 @@ export interface User {
 }
 
 export async function validateUser(email: string, password: string): Promise<User | null> {
-  const result = await pool.query(
-    `SELECT id, email, password, name, role, active FROM "User" WHERE email = $1 AND active = 1`,
-    [email]
-  );
+  const { data, error } = await db
+    .from('User')
+    .select('id, email, password, name, role, active')
+    .eq('email', email)
+    .eq('active', 1)
+    .single();
 
-  if (result.rows.length === 0) return null;
+  if (error || !data) return null;
 
-  const row = result.rows[0];
-  const valid = await bcrypt.compare(password, row.password as string);
+  const valid = await bcrypt.compare(password, (data as any).password as string);
   if (!valid) return null;
 
+  const d = data as any;
   return {
-    id: row.id as number,
-    email: row.email as string,
-    name: row.name as string,
-    role: row.role as Role,
-    active: row.active as number,
+    id: d.id as number,
+    email: d.email as string,
+    name: d.name as string,
+    role: d.role as Role,
+    active: d.active as number,
   };
 }
 
 export async function getUserById(id: number): Promise<User | null> {
-  const result = await pool.query(
-    `SELECT id, email, name, role, active FROM "User" WHERE id = $1`,
-    [id]
-  );
+  const { data, error } = await db
+    .from('User')
+    .select('id, email, name, role, active')
+    .eq('id', id)
+    .single();
 
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0];
-
+  if (error || !data) return null;
+  const d = data as any;
   return {
-    id: row.id as number,
-    email: row.email as string,
-    name: row.name as string,
-    role: row.role as Role,
-    active: row.active as number,
+    id: d.id as number,
+    email: d.email as string,
+    name: d.name as string,
+    role: d.role as Role,
+    active: d.active as number,
   };
 }
 

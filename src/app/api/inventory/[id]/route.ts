@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 
 export async function GET(
   _req: NextRequest,
@@ -10,63 +10,48 @@ export async function GET(
   if (!session) return Response.json({ error: 'No autorizado' }, { status: 401 });
 
   const { id } = await params;
+  const rollId = Number(id);
 
   try {
-    const rollResult = await pool.query(`
-      SELECT
-        r.id, r."rollNumber", r.barcode, r."initialMeters", r."currentMeters",
-        r.location, r.status, r."isRemnant", r."createdAt", r."updatedAt",
-        p.id as "productId", p.name as "productName", p.code as "productCode",
-        p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C",
-        c.name as "categoryName", l."lotNumber"
-      FROM "Roll" r
-      JOIN "Product" p ON r."productId" = p.id
-      JOIN "Category" c ON p."categoryId" = c.id
-      LEFT JOIN "ImportLot" l ON r."lotId" = l.id
-      WHERE r.id = $1
-    `, [id]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rollRes: any = await db.from('Roll').select(`
+      id, rollNumber, barcode, initialMeters, currentMeters, location, status, isRemnant, createdAt, updatedAt,
+      product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
+        category:categoryId(name)
+      ),
+      lot:lotId(lotNumber)
+    `).eq('id', rollId).single();
 
-    if (rollResult.rows.length === 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const movRes: any = await db.from('Movement').select(`
+      id, type, meters, notes, barcodeUsed, createdAt,
+      user:userId(name),
+      sale:saleId(client:clientId(name))
+    `).eq('rollId', rollId).order('createdAt', { ascending: false }).limit(50);
+
+    if (rollRes.error || !rollRes.data) {
       return Response.json({ error: 'Rollo no encontrado' }, { status: 404 });
     }
 
-    const r = rollResult.rows[0];
-
-    const movResult = await pool.query(`
-      SELECT m.id, m.type, m.meters, m.notes, m."barcodeUsed", m."createdAt",
-             u.name as "userName",
-             cl.name as "clientName"
-      FROM "Movement" m
-      JOIN "User" u ON m."userId" = u.id
-      LEFT JOIN "Sale" s ON m."saleId" = s.id
-      LEFT JOIN "Client" cl ON s."clientId" = cl.id
-      WHERE m."rollId" = $1
-      ORDER BY m."createdAt" DESC
-      LIMIT 50
-    `, [id]);
+    const r = rollRes.data;
+    const movements = (movRes.data ?? []).map((m: any) => ({
+      id: m.id, type: m.type, meters: m.meters, notes: m.notes,
+      barcodeUsed: Boolean(m.barcodeUsed), createdAt: m.createdAt,
+      userName: m.user?.name ?? '', clientName: m.sale?.client?.name ?? null,
+    }));
 
     return Response.json({
-      id: r.id,
-      rollNumber: r.rollNumber,
-      barcode: r.barcode,
-      initialMeters: r.initialMeters,
-      currentMeters: r.currentMeters,
-      location: r.location,
-      status: r.status,
-      isRemnant: r.isRemnant === 1,
+      id: r.id, rollNumber: r.rollNumber, barcode: r.barcode,
+      initialMeters: r.initialMeters, currentMeters: r.currentMeters,
+      location: r.location, status: r.status, isRemnant: Boolean(r.isRemnant),
       product: {
-        id: r.productId,
-        name: r.productName,
-        code: r.productCode,
-        color: r.color,
-        width: r.width,
-        priceOwner: r.priceOwner,
-        priceB2B: r.priceB2B,
-        priceB2C: r.priceB2C,
+        id: r.product?.id, name: r.product?.name, code: r.product?.code,
+        color: r.product?.color, width: r.product?.width,
+        priceOwner: r.product?.priceOwner, priceB2B: r.product?.priceB2B, priceB2C: r.product?.priceB2C,
       },
-      categoryName: r.categoryName,
-      lotNumber: r.lotNumber,
-      movements: movResult.rows,
+      categoryName: r.product?.category?.name ?? '',
+      lotNumber: r.lot?.lotNumber ?? null,
+      movements,
     });
   } catch (err) {
     console.error('GET /api/inventory/[id] error:', err);

@@ -1,37 +1,36 @@
 import { getSession } from '@/lib/session';
 import { canSeeCatalog, type Role } from '@/lib/auth';
 import { redirect } from 'next/navigation';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 import CatalogClient from './client';
 
 async function getProducts() {
-  const result = await pool.query(`
-    SELECT
-      p.id, p.name, p.code, p.color, p.width,
-      p."priceOwner", p."priceB2B", p."priceB2C", p.active,
-      c.id as "categoryId", c.name as "categoryName",
-      COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) as "activeRolls",
-      COALESCE(SUM(CASE WHEN r.status = 'ACTIVE' THEN r."currentMeters" END), 0) as "totalMeters"
-    FROM "Product" p
-    JOIN "Category" c ON p."categoryId" = c.id
-    LEFT JOIN "Roll" r ON r."productId" = p.id
-    WHERE p.active = 1
-    GROUP BY p.id, p.name, p.code, p.color, p.width, p."priceOwner", p."priceB2B", p."priceB2C", p.active, c.id, c.name
-    ORDER BY c.name, p.name
-  `);
+  const [productsRes, rollsRes] = await Promise.all([
+    db.from('Product').select('id, name, code, color, width, priceOwner, priceB2B, priceB2C, active, category:categoryId(id, name)').eq('active', 1).order('name', { ascending: true }),
+    db.from('Roll').select('productId, currentMeters, status').eq('status', 'ACTIVE'),
+  ]);
 
-  return result.rows.map(r => ({
-    id: r.id as number,
-    name: r.name as string,
-    code: r.code as string,
-    color: r.color as string,
-    width: r.width as number,
-    priceOwner: r.priceOwner as number,
-    priceB2B: r.priceB2B as number,
-    priceB2C: r.priceB2C as number,
-    category: { id: r.categoryId as number, name: r.categoryName as string },
-    activeRolls: r.activeRolls as number,
-    totalMeters: r.totalMeters as number,
+  const products = (productsRes.data ?? []) as any[];
+  const rolls = (rollsRes.data ?? []) as any[];
+
+  const rollStats = new Map<number, { count: number; meters: number }>();
+  for (const r of rolls) {
+    const prev = rollStats.get(r.productId) ?? { count: 0, meters: 0 };
+    rollStats.set(r.productId, { count: prev.count + 1, meters: prev.meters + (r.currentMeters as number) });
+  }
+
+  return products.map(p => ({
+    id: p.id as number,
+    name: p.name as string,
+    code: p.code as string,
+    color: p.color as string,
+    width: p.width as number,
+    priceOwner: p.priceOwner as number,
+    priceB2B: p.priceB2B as number,
+    priceB2C: p.priceB2C as number,
+    category: { id: p.category?.id as number, name: p.category?.name as string },
+    activeRolls: rollStats.get(p.id)?.count ?? 0,
+    totalMeters: rollStats.get(p.id)?.meters ?? 0,
   }));
 }
 
@@ -39,6 +38,5 @@ export default async function CatalogPage() {
   const session = await getSession();
   if (!canSeeCatalog(session!.role as Role)) redirect('/dashboard');
   const products = await getProducts();
-  const isOwner = session!.role === 'OWNER';
-  return <CatalogClient products={products} isOwner={isOwner} />;
+  return <CatalogClient products={products} isOwner={session!.role === 'OWNER'} />;
 }

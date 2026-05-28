@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
 import { canManageInventory, type Role } from '@/lib/auth';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -23,33 +23,55 @@ export async function POST(request: NextRequest) {
     }
 
     const now = Date.now();
+    const dbAny = db as any;
 
-    const rollResult = await pool.query(
-      `INSERT INTO "Roll" ("rollNumber", barcode, "productId", "lotId", "initialMeters", "currentMeters", location, status, "isRemnant", "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', 0, $8, $9) RETURNING id`,
-      [String(rollNumber), barcode ? String(barcode) : null, Number(productId), Number(lotId), meters, meters, String(location), now, now]
-    );
+    const { data: rollData, error: rollError } = await dbAny.from('Roll').insert({
+      rollNumber: String(rollNumber),
+      barcode: barcode ? String(barcode) : null,
+      productId: Number(productId),
+      lotId: Number(lotId),
+      initialMeters: meters,
+      currentMeters: meters,
+      location: String(location),
+      status: 'ACTIVE',
+      isRemnant: 0,
+      createdAt: now,
+      updatedAt: now,
+    }).select('id').single();
 
-    const newRollId = rollResult.rows[0].id;
+    if (rollError) {
+      if (rollError.message?.includes('unique') || rollError.code === '23505') {
+        return Response.json({ error: 'El barcode ya existe' }, { status: 409 });
+      }
+      throw rollError;
+    }
 
-    await pool.query(
-      `INSERT INTO "Movement" (type, "rollId", meters, "userId", "saleId", notes, "barcodeUsed", "createdAt")
-       VALUES ('ENTRY', $1, $2, $3, null, 'Entrada de importación', 0, $4)`,
-      [newRollId, meters, session.userId, now]
-    );
+    const newRollId = rollData.id;
 
-    await pool.query(
-      `INSERT INTO "AuditLog" ("userId", action, entity, "entityId", "oldData", "newData", "createdAt")
-       VALUES ($1, 'ENTRY', 'Roll', $2, null, $3, $4)`,
-      [session.userId, newRollId, JSON.stringify({ rollNumber, productId, lotId, initialMeters: meters }), now]
-    );
+    await dbAny.from('Movement').insert({
+      type: 'ENTRY',
+      rollId: newRollId,
+      meters,
+      userId: session.userId,
+      saleId: null,
+      notes: 'Entrada de importación',
+      barcodeUsed: 0,
+      createdAt: now,
+    });
+
+    await dbAny.from('AuditLog').insert({
+      userId: session.userId,
+      action: 'ENTRY',
+      entity: 'Roll',
+      entityId: newRollId,
+      oldData: null,
+      newData: JSON.stringify({ rollNumber, productId, lotId, initialMeters: meters }),
+      createdAt: now,
+    });
 
     return Response.json({ ok: true, rollId: newRollId }, { status: 201 });
   } catch (err) {
     console.error('POST /api/inventory/entry error:', err);
-    if (String(err).includes('unique') || String(err).includes('UNIQUE')) {
-      return Response.json({ error: 'El barcode ya existe' }, { status: 409 });
-    }
     return Response.json({ error: 'Error al registrar entrada' }, { status: 500 });
   }
 }

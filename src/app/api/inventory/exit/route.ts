@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -12,35 +12,31 @@ export async function POST(request: NextRequest) {
     if (!rollId || !clientId || !exitType) {
       return Response.json({ error: 'rollId, clientId y exitType son requeridos' }, { status: 400 });
     }
-
     if (exitType !== 'EXIT_FULL' && exitType !== 'EXIT_PARTIAL') {
       return Response.json({ error: 'exitType debe ser EXIT_FULL o EXIT_PARTIAL' }, { status: 400 });
     }
 
-    // Fetch roll + priceB2B for total calculation
-    const rollResult = await pool.query(
-      `SELECT r.id, r."currentMeters", r.status, p."priceB2B"
-       FROM "Roll" r
-       JOIN "Product" p ON r."productId" = p.id
-       WHERE r.id = $1`,
-      [rollId]
-    );
+    const dbAny = db as any;
 
-    if (rollResult.rows.length === 0) {
+    // Fetch roll + priceB2B
+    const rollRes: any = await dbAny.from('Roll')
+      .select('id, currentMeters, status, product:productId(priceB2B)')
+      .eq('id', Number(rollId))
+      .single();
+
+    if (rollRes.error || !rollRes.data) {
       return Response.json({ error: 'Rollo no encontrado' }, { status: 404 });
     }
 
-    const roll = rollResult.rows[0];
-
-    if (roll.status !== 'ACTIVE') {
+    const rd = rollRes.data;
+    if (rd.status !== 'ACTIVE') {
       return Response.json({ error: 'El rollo no está activo' }, { status: 400 });
     }
 
-    const currentMeters = roll.currentMeters as number;
-    const priceB2B = roll.priceB2B as number;
+    const currentMeters = rd.currentMeters as number;
+    const priceB2B = rd.product?.priceB2B as number ?? 0;
 
     let metersUsed: number;
-
     if (exitType === 'EXIT_FULL') {
       metersUsed = currentMeters;
     } else {
@@ -49,9 +45,7 @@ export async function POST(request: NextRequest) {
         return Response.json({ error: 'Los metros deben ser un número positivo' }, { status: 400 });
       }
       if (metersNum > currentMeters) {
-        return Response.json({
-          error: `Metros insuficientes. Disponibles: ${currentMeters}m`,
-        }, { status: 400 });
+        return Response.json({ error: `Metros insuficientes. Disponibles: ${currentMeters}m` }, { status: 400 });
       }
       metersUsed = metersNum;
     }
@@ -63,39 +57,50 @@ export async function POST(request: NextRequest) {
     const today = new Date().toISOString().split('T')[0];
     const total = metersUsed * priceB2B;
 
-    await pool.query(
-      `UPDATE "Roll" SET "currentMeters" = $1, status = $2, "isRemnant" = $3, "updatedAt" = $4 WHERE id = $5`,
-      [newMeters, newStatus, isRemnant, now, rollId]
-    );
+    // Update roll
+    await dbAny.from('Roll').update({
+      currentMeters: newMeters,
+      status: newStatus,
+      isRemnant,
+      updatedAt: now,
+    }).eq('id', Number(rollId));
 
-    const saleResult = await pool.query(
-      `INSERT INTO "Sale" ("clientId", date, total, "createdAt") VALUES ($1, $2, $3, $4) RETURNING id`,
-      [clientId, today, total, now]
-    );
-    const saleId = saleResult.rows[0].id;
+    // Insert Sale
+    const saleRes: any = await dbAny.from('Sale').insert({
+      clientId: Number(clientId),
+      date: today,
+      total,
+      createdAt: now,
+    }).select('id').single();
 
-    const movResult = await pool.query(
-      `INSERT INTO "Movement" (type, "rollId", meters, "userId", "saleId", notes, "barcodeUsed", "createdAt")
-       VALUES ($1, $2, $3, $4, $5, $6, 0, $7) RETURNING id`,
-      [exitType, rollId, metersUsed, session.userId, saleId, notes ?? null, now]
-    );
+    const saleId = saleRes.data?.id;
 
-    await pool.query(
-      `INSERT INTO "AuditLog" ("userId", action, entity, "entityId", "oldData", "newData", "createdAt")
-       VALUES ($1, $2, 'Roll', $3, $4, $5, $6)`,
-      [
-        session.userId,
-        exitType,
-        rollId,
-        JSON.stringify({ currentMeters }),
-        JSON.stringify({ currentMeters: newMeters, status: newStatus }),
-        now,
-      ]
-    );
+    // Insert Movement
+    const movRes: any = await dbAny.from('Movement').insert({
+      type: exitType,
+      rollId: Number(rollId),
+      meters: metersUsed,
+      userId: session.userId,
+      saleId,
+      notes: notes ?? null,
+      barcodeUsed: 0,
+      createdAt: now,
+    }).select('id').single();
+
+    // Insert AuditLog
+    await dbAny.from('AuditLog').insert({
+      userId: session.userId,
+      action: exitType,
+      entity: 'Roll',
+      entityId: Number(rollId),
+      oldData: JSON.stringify({ currentMeters }),
+      newData: JSON.stringify({ currentMeters: newMeters, status: newStatus }),
+      createdAt: now,
+    });
 
     return Response.json({
       ok: true,
-      movementId: movResult.rows[0].id,
+      movementId: movRes.data?.id,
       newMeters,
       newStatus,
       isRemnant: isRemnant === 1,

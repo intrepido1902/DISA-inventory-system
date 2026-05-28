@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
 import { canSeeCatalog, type Role } from '@/lib/auth';
-import { pool } from '@/lib/db';
+import { db } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -11,49 +11,42 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const action = searchParams.get('action') ?? '';
-  const userId = searchParams.get('userId') ?? '';
+  const actionFilter = searchParams.get('action') ?? '';
+  const userIdFilter = searchParams.get('userId') ?? '';
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo = searchParams.get('dateTo') ?? '';
 
-  const params: (string | number)[] = [];
-  function p(val: string | number) {
-    params.push(val);
-    return `$${params.length}`;
-  }
-
-  let sql = `
-    SELECT
-      a.id, a.action, a.entity, a."entityId", a."oldData", a."newData", a."createdAt",
-      u.name as "userName", u.email as "userEmail"
-    FROM "AuditLog" a
-    JOIN "User" u ON a."userId" = u.id
-    WHERE 1=1
-  `;
-
-  if (action) sql += ` AND a.action = ${p(action)}`;
-  if (userId) sql += ` AND a."userId" = ${p(Number(userId))}`;
-  if (dateFrom) {
-    const from = new Date(dateFrom).setHours(0, 0, 0, 0);
-    sql += ` AND a."createdAt" >= ${p(from)}`;
-  }
-  if (dateTo) {
-    const to = new Date(dateTo).setHours(23, 59, 59, 999);
-    sql += ` AND a."createdAt" <= ${p(to)}`;
-  }
-
-  sql += ` ORDER BY a."createdAt" DESC LIMIT 500`;
-
   try {
-    const [logsResult, usersResult] = await Promise.all([
-      pool.query(sql, params),
-      pool.query(`SELECT id, name FROM "User" ORDER BY name`),
+    let query = db.from('AuditLog').select(`
+      id, action, entity, entityId, oldData, newData, createdAt,
+      user:userId(name, email)
+    `);
+
+    if (actionFilter) query = query.eq('action', actionFilter);
+    if (userIdFilter) query = query.eq('userId', Number(userIdFilter));
+    if (dateFrom) query = query.gte('createdAt', new Date(dateFrom).setHours(0, 0, 0, 0));
+    if (dateTo) query = query.lte('createdAt', new Date(dateTo).setHours(23, 59, 59, 999));
+
+    const [logsRes, usersRes] = await Promise.all([
+      query.order('createdAt', { ascending: false }).limit(500),
+      db.from('User').select('id, name').order('name', { ascending: true }),
     ]);
 
-    return Response.json({
-      logs: logsResult.rows,
-      users: usersResult.rows,
-    });
+    if (logsRes.error) throw logsRes.error;
+
+    const logs = (logsRes.data ?? []).map((l: any) => ({
+      id: l.id,
+      action: l.action,
+      entity: l.entity,
+      entityId: l.entityId,
+      oldData: l.oldData,
+      newData: l.newData,
+      createdAt: l.createdAt,
+      userName: l.user?.name ?? '',
+      userEmail: l.user?.email ?? '',
+    }));
+
+    return Response.json({ logs, users: usersRes.data ?? [] });
   } catch (err) {
     console.error('GET /api/audit error:', err);
     return Response.json({ error: 'Error al obtener auditoría' }, { status: 500 });
