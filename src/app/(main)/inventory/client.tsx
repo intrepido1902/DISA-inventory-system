@@ -141,6 +141,25 @@ export default function InventoryClient({
 
   useEffect(() => { setPage(1); }, [search, categoryFilter, statusFilter, tab]);
 
+  // Consecutive display numbers by category, stable across pages/filters
+  // Velo → 1001+, Blackout → 1201+, ordered by category.id ASC then roll.id ASC
+  const displayNumbers = useMemo(() => {
+    const OFFSETS: Record<string, number> = { Velo: 1001, Blackout: 1201 };
+    const DEFAULT_OFFSET = 2001;
+    const sorted = [...rolls].sort((a, b) =>
+      a.category.id !== b.category.id ? a.category.id - b.category.id : a.id - b.id
+    );
+    const counters: Record<string, number> = {};
+    const map = new Map<number, number>();
+    for (const r of sorted) {
+      const cat = r.category.name;
+      const start = OFFSETS[cat] ?? DEFAULT_OFFSET;
+      if (counters[cat] === undefined) counters[cat] = 0;
+      map.set(r.id, start + counters[cat]++);
+    }
+    return map;
+  }, [rolls]);
+
   // Rolls for selected product (active, sorted by meters ASC for remnants first)
   const rollsForProduct = useMemo(() => {
     if (!exitProductId) return [];
@@ -276,7 +295,7 @@ export default function InventoryClient({
   const remnantCount = rolls.filter(r => r.isRemnant && r.status === 'ACTIVE').length;
 
   return (
-    <div className="p-6">
+    <div className="p-4 lg:p-6">
       {toast && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
@@ -284,7 +303,7 @@ export default function InventoryClient({
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Inventario</h1>
+          <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Inventario</h1>
           <p className="text-sm text-gray-500 mt-0.5">{rolls.filter(r => r.status === 'ACTIVE').length} rollos activos</p>
         </div>
         <div className="flex gap-2">
@@ -373,7 +392,7 @@ export default function InventoryClient({
       {/* Table */}
       <div className="bg-white rounded-lg border border-[#E5E5E5] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[720px]">
             <thead>
               <tr className="border-b border-[#E5E5E5] text-xs text-gray-500 uppercase tracking-wide bg-gray-50">
                 <th className="px-4 py-3 text-left">Rollo #</th>
@@ -398,7 +417,10 @@ export default function InventoryClient({
               ) : (
                 paged.map(roll => (
                   <tr key={roll.id} className="border-b border-[#F5F5F5] hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{roll.rollNumber}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-600">
+                      <div className="font-semibold text-gray-800">{displayNumbers.get(roll.id) ?? roll.id}</div>
+                      <div className="text-[10px] text-gray-400">{roll.rollNumber}</div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900">{roll.product.name}</div>
                       <div className="text-xs text-gray-400">{roll.product.code}</div>
@@ -479,10 +501,10 @@ export default function InventoryClient({
         )}
       </div>
 
-      {/* EXIT MODAL — multi-step */}
+      {/* EXIT MODAL — multi-step: bottom-sheet en móvil, modal centrado en desktop */}
       {showExit && (
-        <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4" onClick={closeExit}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center sm:p-4" onClick={closeExit}>
+          <div className="bg-white w-full sm:rounded-xl rounded-t-2xl shadow-2xl sm:max-w-lg max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[#F0F0F0]">
               <div>
@@ -763,8 +785,8 @@ export default function InventoryClient({
 
       {/* ENTRY MODAL */}
       {showEntry && (
-        <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4" onClick={() => setShowEntry(false)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowEntry(false)}>
+          <div className="bg-white w-full sm:rounded-xl rounded-t-2xl shadow-2xl sm:max-w-md p-6 max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-gray-900">Nueva entrada</h2>
               <button onClick={() => setShowEntry(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
