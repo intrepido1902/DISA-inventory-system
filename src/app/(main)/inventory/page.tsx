@@ -4,10 +4,11 @@ import InventoryClient from './client';
 
 async function getInventoryData() {
   const [rollsRes, clientsRes, productsRes, lotsRes] = await Promise.all([
-    // NOTE: label_number requires SQL migration first:
-    // ALTER TABLE "Roll" ADD COLUMN label_number INTEGER;
+    // NOTE: disaNumber requires SQL migration before deploying:
+    // ALTER TABLE "Roll" ADD COLUMN "disaNumber" TEXT;
+    // CREATE UNIQUE INDEX roll_disanumber_idx ON "Roll"("disaNumber") WHERE "disaNumber" IS NOT NULL;
     db.from('Roll').select(`
-      id, rollNumber, barcode, label_number, initialMeters, currentMeters,
+      id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
       location, status, isRemnant, updatedAt,
       product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
         category:categoryId(id, name)
@@ -23,7 +24,7 @@ async function getInventoryData() {
     id: r.id as number,
     rollNumber: r.rollNumber as string,
     barcode: r.barcode as string | null,
-    labelNumber: r.label_number as number | null ?? null,
+    disaNumber: r.disaNumber as string | null ?? null,
     initialMeters: r.initialMeters as number,
     currentMeters: r.currentMeters as number,
     location: r.location as string,

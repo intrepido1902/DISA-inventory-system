@@ -11,10 +11,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { rollNumber, productId, lotId, initialMeters, location, barcode } = await request.json();
+    const { rollNumber, productId, lotId, initialMeters, location, barcode, disaNumber } = await request.json();
 
     if (!rollNumber || !productId || !lotId || !initialMeters || !location) {
-      return Response.json({ error: 'Todos los campos son requeridos excepto barcode' }, { status: 400 });
+      return Response.json({ error: 'Todos los campos son requeridos excepto barcode y disaNumber' }, { status: 400 });
     }
 
     const meters = Number(initialMeters);
@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
     const { data: rollData, error: rollError } = await dbAny.from('Roll').insert({
       rollNumber: String(rollNumber),
       barcode: barcode ? String(barcode) : null,
+      disaNumber: disaNumber ? String(disaNumber).trim() : null,
       productId: Number(productId),
       lotId: Number(lotId),
       initialMeters: meters,
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     if (rollError) {
       if (rollError.message?.includes('unique') || rollError.code === '23505') {
-        return Response.json({ error: 'El barcode ya existe' }, { status: 409 });
+        return Response.json({ error: 'El barcode o consecutivo DISA ya existe' }, { status: 409 });
       }
       throw rollError;
     }
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       entity: 'Roll',
       entityId: newRollId,
       oldData: null,
-      newData: JSON.stringify({ rollNumber, productId, lotId, initialMeters: meters }),
+      newData: JSON.stringify({ rollNumber, disaNumber, productId, lotId, initialMeters: meters }),
       createdAt: now,
     });
 

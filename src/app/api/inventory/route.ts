@@ -13,10 +13,11 @@ export async function GET(request: NextRequest) {
   const isRemnantFilter = searchParams.get('isRemnant') ?? '';
 
   try {
-    // NOTE: label_number column must exist — run the SQL migration first:
-    // ALTER TABLE "Roll" ADD COLUMN label_number INTEGER;
+    // NOTE: disaNumber requires SQL migration:
+    // ALTER TABLE "Roll" ADD COLUMN "disaNumber" TEXT;
+    // CREATE UNIQUE INDEX roll_disanumber_idx ON "Roll"("disaNumber") WHERE "disaNumber" IS NOT NULL;
     let query = db.from('Roll').select(`
-      id, rollNumber, barcode, label_number, initialMeters, currentMeters,
+      id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
       location, status, isRemnant, createdAt, updatedAt,
       product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
         category:categoryId(id, name)
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
       id: r.id as number,
       rollNumber: r.rollNumber as string,
       barcode: r.barcode as string | null,
-      labelNumber: r.label_number as number | null ?? null,
+      disaNumber: r.disaNumber as string | null ?? null,
       initialMeters: r.initialMeters as number,
       currentMeters: r.currentMeters as number,
       location: r.location as string,
@@ -60,15 +61,17 @@ export async function GET(request: NextRequest) {
     }));
 
     if (categoryFilter) {
-      rolls = rolls.filter(r => r.category.name === categoryFilter);
+      rolls = rolls.filter(r => r.category.name?.toLowerCase() === categoryFilter.toLowerCase());
     }
     if (search) {
       rolls = rolls.filter(r =>
+        (r.disaNumber ?? '').toLowerCase().includes(search) ||
         r.rollNumber?.toLowerCase().includes(search) ||
         (r.barcode ?? '').toLowerCase().includes(search) ||
         r.product?.name?.toLowerCase().includes(search) ||
         r.product?.code?.toLowerCase().includes(search) ||
-        r.product?.color?.toLowerCase().includes(search)
+        r.product?.color?.toLowerCase().includes(search) ||
+        r.location?.toLowerCase().includes(search)
       );
     }
 
