@@ -4,8 +4,10 @@ import InventoryClient from './client';
 
 async function getInventoryData() {
   const [rollsRes, clientsRes, productsRes, lotsRes] = await Promise.all([
+    // NOTE: label_number requires SQL migration first:
+    // ALTER TABLE "Roll" ADD COLUMN label_number INTEGER;
     db.from('Roll').select(`
-      id, rollNumber, barcode, initialMeters, currentMeters,
+      id, rollNumber, barcode, label_number, initialMeters, currentMeters,
       location, status, isRemnant, updatedAt,
       product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
         category:categoryId(id, name)
@@ -21,6 +23,7 @@ async function getInventoryData() {
     id: r.id as number,
     rollNumber: r.rollNumber as string,
     barcode: r.barcode as string | null,
+    labelNumber: r.label_number as number | null ?? null,
     initialMeters: r.initialMeters as number,
     currentMeters: r.currentMeters as number,
     location: r.location as string,
@@ -49,16 +52,39 @@ async function getInventoryData() {
 
   return {
     rolls,
-    clients: (clientsRes.data ?? []).map((r: any) => ({ id: r.id as number, name: r.name as string, type: r.type as string })),
-    products: (productsRes.data ?? []).map((r: any) => ({ id: r.id as number, name: r.name as string, code: r.code as string, color: r.color as string, width: r.width as number })),
-    lots: (lotsRes.data ?? []).map((r: any) => ({ id: r.id as number, lotNumber: r.lotNumber as string })),
+    clients: (clientsRes.data ?? []).map((r: any) => ({
+      id: r.id as number,
+      name: r.name as string,
+      type: r.type as string,
+    })),
+    products: (productsRes.data ?? []).map((r: any) => ({
+      id: r.id as number,
+      name: r.name as string,
+      code: r.code as string,
+      color: r.color as string,
+      width: r.width as number,
+    })),
+    lots: (lotsRes.data ?? []).map((r: any) => ({
+      id: r.id as number,
+      lotNumber: r.lotNumber as string,
+    })),
   };
 }
 
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; exitModal?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    exitModal?: string;
+    q?: string;
+    cat?: string;
+    status?: string;
+    color?: string;
+    minM?: string;
+    maxM?: string;
+    loc?: string;
+  }>;
 }) {
   const session = await getSession();
   const sp = await searchParams;
@@ -73,6 +99,13 @@ export default async function InventoryPage({
       userRole={session!.role}
       initialTab={sp.tab === 'remnants' ? 'remnants' : 'all'}
       openExitModal={sp.exitModal === '1'}
+      initialSearch={sp.q ?? ''}
+      initialCategory={sp.cat ?? ''}
+      initialStatus={sp.status ?? ''}
+      initialColor={sp.color ?? ''}
+      initialMinMeters={sp.minM ?? ''}
+      initialMaxMeters={sp.maxM ?? ''}
+      initialLocation={sp.loc ?? ''}
     />
   );
 }
