@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     let query = db.from('Roll').select(`
       id, rollNumber, barcode, currentMeters, initialMeters, status, isRemnant,
       product:productId(id, name, color)
-    `).eq('status', 'ACTIVE').eq('isRemnant', 1);
+    `).eq('status', 'REMNANT');
 
     if (productId) query = query.eq('productId', Number(productId));
 

@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const { data, error } = await db
       .from('Client')
-      .select('id, name, type, phone, email, notes, active, createdAt')
+      .select('id, name, type, phone, email, notes, active, createdAt, pricePerMeter')
       .eq('active', 1)
       .order('name', { ascending: true });
     if (error) throw error;
@@ -30,20 +30,27 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { name, type, phone, email, notes } = body as {
+    const { name, type, phone, email, notes, pricePerMeter } = body as {
       name?: string;
       type?: string;
       phone?: string | null;
       email?: string | null;
       notes?: string | null;
+      pricePerMeter?: number | null;
     };
 
     if (!name?.trim()) {
       return Response.json({ error: 'El nombre del cliente es requerido' }, { status: 400 });
     }
 
+    // DISTRIBUTOR = Fijo (has fixed pricePerMeter), DECORATOR = Ocasional
     const validTypes = ['DISTRIBUTOR', 'DECORATOR'];
     const clientType = validTypes.includes(type ?? '') ? type! : 'DISTRIBUTOR';
+
+    // pricePerMeter required for DISTRIBUTOR clients
+    const priceValue = clientType === 'DISTRIBUTOR' && pricePerMeter && pricePerMeter > 0
+      ? pricePerMeter
+      : null;
 
     const now = Date.now();
     const dbAny = db as any;
@@ -56,10 +63,11 @@ export async function POST(request: NextRequest) {
         phone: phone?.trim() || null,
         email: email?.trim() || null,
         notes: notes?.trim() || null,
+        pricePerMeter: priceValue,
         active: 1,
         createdAt: now,
       })
-      .select('id, name, type, phone, email, notes, active, createdAt')
+      .select('id, name, type, phone, email, notes, active, createdAt, pricePerMeter')
       .single();
 
     if (error) {
@@ -73,7 +81,7 @@ export async function POST(request: NextRequest) {
       entity: 'Client',
       entityId: data.id,
       oldData: null,
-      newData: JSON.stringify({ name: name.trim(), type: clientType }),
+      newData: JSON.stringify({ name: name.trim(), type: clientType, pricePerMeter: priceValue }),
       createdAt: now,
     });
 

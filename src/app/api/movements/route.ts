@@ -12,10 +12,10 @@ export async function GET(request: NextRequest) {
 
   try {
     let query = db.from('Movement').select(`
-      id, type, meters, notes, barcodeUsed, createdAt,
+      id, type, meters, notes, barcodeUsed, createdAt, reverted,
       roll:rollId(rollNumber, barcode, product:productId(name, code, color, priceB2B)),
       user:userId(name),
-      sale:saleId(client:clientId(name, type))
+      sale:saleId(client:clientId(name, type), total)
     `);
 
     if (typeFilter) query = query.eq('type', typeFilter);
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await query
       .order('createdAt', { ascending: false })
-      .limit(100);
+      .limit(200);
 
     if (error) throw error;
 
@@ -38,12 +38,14 @@ export async function GET(request: NextRequest) {
       notes: m.notes,
       barcodeUsed: Boolean(m.barcodeUsed),
       createdAt: m.createdAt,
+      reverted: Boolean(m.reverted),
       rollNumber: m.roll?.rollNumber ?? '',
       barcode: m.roll?.barcode ?? null,
       productName: m.roll?.product?.name ?? '',
       productCode: m.roll?.product?.code ?? '',
       color: m.roll?.product?.color ?? '',
       priceB2B: m.roll?.product?.priceB2B ?? 0,
+      saleTotal: m.sale?.total ?? null,
       userName: m.user?.name ?? '',
       clientName: m.sale?.client?.name ?? null,
       clientType: m.sale?.client?.type ?? null,

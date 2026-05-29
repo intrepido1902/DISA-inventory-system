@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   if (!session) return Response.json({ error: 'No autorizado' }, { status: 401 });
 
   try {
-    const { rollId, meters, clientId, notes, exitType } = await request.json();
+    const { rollId, meters, clientId, notes, exitType, pricePerMeter } = await request.json();
 
     if (!rollId || !clientId || !exitType) {
       return Response.json({ error: 'rollId, clientId y exitType son requeridos' }, { status: 400 });
@@ -15,12 +15,16 @@ export async function POST(request: NextRequest) {
     if (exitType !== 'EXIT_FULL' && exitType !== 'EXIT_PARTIAL') {
       return Response.json({ error: 'exitType debe ser EXIT_FULL o EXIT_PARTIAL' }, { status: 400 });
     }
+    const pricePerM = Number(pricePerMeter) || 0;
+    if (pricePerM <= 0) {
+      return Response.json({ error: 'El precio por metro debe ser mayor a 0' }, { status: 400 });
+    }
 
     const dbAny = db as any;
 
-    // Fetch roll + priceB2B
-    const rollRes: any = await dbAny.from('Roll')
-      .select('id, currentMeters, status, product:productId(priceB2B)')
+    const rollRes: any = await dbAny
+      .from('Roll')
+      .select('id, currentMeters, initialMeters, status')
       .eq('id', Number(rollId))
       .single();
 
@@ -29,12 +33,12 @@ export async function POST(request: NextRequest) {
     }
 
     const rd = rollRes.data;
-    if (rd.status !== 'ACTIVE') {
-      return Response.json({ error: 'El rollo no está activo' }, { status: 400 });
+    // Allow exit from ACTIVE or REMNANT rolls
+    if (rd.status !== 'ACTIVE' && rd.status !== 'REMNANT') {
+      return Response.json({ error: 'El rollo no está disponible para salida' }, { status: 400 });
     }
 
     const currentMeters = rd.currentMeters as number;
-    const priceB2B = rd.product?.priceB2B as number ?? 0;
 
     let metersUsed: number;
     if (exitType === 'EXIT_FULL') {
@@ -51,13 +55,13 @@ export async function POST(request: NextRequest) {
     }
 
     const newMeters = currentMeters - metersUsed;
-    const isRemnant = newMeters > 0 && newMeters <= 10 ? 1 : 0;
-    const newStatus = newMeters === 0 ? 'DEPLETED' : 'ACTIVE';
+    // Cambio 3: any cut → REMNANT (if meters remain), else DEPLETED
+    const isRemnant = newMeters > 0 ? 1 : 0;
+    const newStatus = newMeters === 0 ? 'DEPLETED' : 'REMNANT';
     const now = Date.now();
     const today = new Date().toISOString().split('T')[0];
-    const total = metersUsed * priceB2B;
+    const total = metersUsed * pricePerM;
 
-    // Update roll
     await dbAny.from('Roll').update({
       currentMeters: newMeters,
       status: newStatus,
@@ -65,7 +69,6 @@ export async function POST(request: NextRequest) {
       updatedAt: now,
     }).eq('id', Number(rollId));
 
-    // Insert Sale
     const saleRes: any = await dbAny.from('Sale').insert({
       clientId: Number(clientId),
       date: today,
@@ -75,7 +78,6 @@ export async function POST(request: NextRequest) {
 
     const saleId = saleRes.data?.id;
 
-    // Insert Movement
     const movRes: any = await dbAny.from('Movement').insert({
       type: exitType,
       rollId: Number(rollId),
@@ -87,14 +89,13 @@ export async function POST(request: NextRequest) {
       createdAt: now,
     }).select('id').single();
 
-    // Insert AuditLog
     await dbAny.from('AuditLog').insert({
       userId: session.userId,
       action: exitType,
       entity: 'Roll',
       entityId: Number(rollId),
       oldData: JSON.stringify({ currentMeters }),
-      newData: JSON.stringify({ currentMeters: newMeters, status: newStatus }),
+      newData: JSON.stringify({ currentMeters: newMeters, status: newStatus, pricePerMeter: pricePerM }),
       createdAt: now,
     });
 

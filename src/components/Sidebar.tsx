@@ -3,6 +3,17 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
+import {
+  LayoutDashboard,
+  Package,
+  ArrowRightLeft,
+  BookOpen,
+  Users,
+  UserCog,
+  ClipboardList,
+  LogOut,
+  type LucideIcon,
+} from 'lucide-react';
 
 export interface SidebarUser {
   userId: number;
@@ -11,25 +22,31 @@ export interface SidebarUser {
   role: string;
 }
 
-const NAV = [
-  { href: '/dashboard',  icon: '◈', label: 'Dashboard',    roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/inventory',  icon: '⊟', label: 'Inventario',   roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/catalog',    icon: '⊞', label: 'Catálogo',     roles: ['OWNER', 'ADMIN'] },
-  { href: '/movements',  icon: '↕', label: 'Movimientos',  roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/clients',    icon: '◎', label: 'Clientes',     roles: ['OWNER', 'ADMIN'] },
-  { href: '/users',      icon: '◯', label: 'Usuarios',     roles: ['OWNER'] },
-  { href: '/audit',      icon: '◩', label: 'Auditoría',    roles: ['OWNER', 'ADMIN'] },
+interface NavItem {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  roles: string[];
+}
+
+const NAV: NavItem[] = [
+  { href: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/inventory',  icon: Package,          label: 'Inventario',  roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/movements',  icon: ArrowRightLeft,   label: 'Movimientos', roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/catalog',    icon: BookOpen,          label: 'Catálogo',    roles: ['OWNER', 'ADMIN'] },
+  { href: '/clients',    icon: Users,             label: 'Clientes',    roles: ['OWNER', 'ADMIN'] },
+  { href: '/users',      icon: UserCog,           label: 'Usuarios',    roles: ['OWNER'] },
+  { href: '/audit',      icon: ClipboardList,     label: 'Auditoría',   roles: ['OWNER', 'ADMIN'] },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: 'Socio',
-  ADMIN: 'Admin',
+  ADMIN: 'Adriana',
   WAREHOUSE: 'Bodega',
 };
 
 interface SidebarProps {
   user: SidebarUser;
-  /** En modo drawer (móvil/tablet): muestra labels y botón de cierre */
   drawer?: boolean;
   onClose?: () => void;
 }
@@ -50,10 +67,8 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
   const userItems = NAV.filter(item => item.roles.includes(user.role));
 
   if (drawer) {
-    // ── DRAWER MODE (móvil/tablet): icons + labels, ancho completo ──
     return (
       <div className="w-56 h-full bg-[#0A0A0A] flex flex-col py-4 border-r border-[#1A1A1A]">
-        {/* Header con logo y cierre */}
         <div className="flex items-center justify-between px-4 mb-6">
           <Link href="/dashboard" onClick={onClose} className="flex items-center gap-3">
             <div className="w-8 h-8 bg-white flex items-center justify-center flex-shrink-0">
@@ -68,10 +83,10 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
           )}
         </div>
 
-        {/* Nav */}
         <nav className="flex flex-col gap-0.5 flex-1 px-2">
           {userItems.map(item => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
+            const Icon = item.icon;
             return (
               <Link
                 key={item.href}
@@ -81,14 +96,13 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
                   isActive ? 'bg-white text-black font-semibold' : 'text-[#888] hover:text-white hover:bg-[#1A1A1A]'
                 }`}
               >
-                <span className="text-base w-5 text-center">{item.icon}</span>
+                <Icon size={16} className="flex-shrink-0" />
                 <span>{item.label}</span>
               </Link>
             );
           })}
         </nav>
 
-        {/* User + logout */}
         <div className="px-3 pt-3 border-t border-[#1A1A1A] mt-2">
           <div className="flex items-center gap-3 px-2 py-2 mb-1">
             <div className="w-8 h-8 rounded-full bg-[#222] border border-[#333] flex items-center justify-center flex-shrink-0">
@@ -104,7 +118,7 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
             disabled={loggingOut}
             className="w-full flex items-center gap-3 px-3 py-2 rounded text-[#555] hover:text-red-400 hover:bg-[#1A1A1A] transition-colors text-sm disabled:opacity-40"
           >
-            <span className="text-base">⏻</span>
+            <LogOut size={16} />
             <span>Cerrar sesión</span>
           </button>
         </div>
@@ -124,16 +138,17 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
       <nav className="flex flex-col items-center gap-1 flex-1">
         {userItems.map(item => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
+          const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
               title={item.label}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg transition-colors ${
+              className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
                 isActive ? 'bg-white text-black' : 'text-[#555] hover:text-white hover:bg-[#1A1A1A]'
               }`}
             >
-              {item.icon}
+              <Icon size={18} />
             </Link>
           );
         })}
@@ -150,9 +165,9 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
           onClick={handleLogout}
           disabled={loggingOut}
           title="Cerrar sesión"
-          className="w-8 h-8 flex items-center justify-center rounded text-[#555] hover:text-red-400 hover:bg-[#1A1A1A] transition-colors text-sm disabled:opacity-40"
+          className="w-8 h-8 flex items-center justify-center rounded text-[#555] hover:text-red-400 hover:bg-[#1A1A1A] transition-colors disabled:opacity-40"
         >
-          ⏻
+          <LogOut size={16} />
         </button>
       </div>
     </aside>

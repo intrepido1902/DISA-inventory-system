@@ -6,6 +6,7 @@ export interface ComboClient {
   id: number;
   name: string;
   type: string;
+  pricePerMeter?: number | null;
 }
 
 interface ClientComboboxProps {
@@ -17,9 +18,10 @@ interface ClientComboboxProps {
   disabled?: boolean;
 }
 
+// DISTRIBUTOR = Fijo, DECORATOR = Ocasional
 const TYPE_LABEL: Record<string, string> = {
-  DISTRIBUTOR: 'Distribuidor',
-  DECORATOR: 'Decorador',
+  DISTRIBUTOR: 'Fijo',
+  DECORATOR: 'Ocasional',
 };
 
 export default function ClientCombobox({
@@ -34,11 +36,10 @@ export default function ClientCombobox({
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
-  // Create form state
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'DISTRIBUTOR' | 'DECORATOR'>('DISTRIBUTOR');
   const [newPhone, setNewPhone] = useState('');
-  const [newEmail, setNewEmail] = useState('');
+  const [newPricePerMeter, setNewPricePerMeter] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -53,75 +54,52 @@ export default function ClientCombobox({
     : clients;
 
   const trimmedSearch = search.trim();
-  const exactMatch = clients.some(
-    c => c.name.toLowerCase() === trimmedSearch.toLowerCase(),
-  );
+  const exactMatch = clients.some(c => c.name.toLowerCase() === trimmedSearch.toLowerCase());
   const showCreateOption = trimmedSearch.length > 0 && !exactMatch;
 
-  // Close on outside click
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-        setSearch('');
-        setShowCreate(false);
+        setIsOpen(false); setSearch(''); setShowCreate(false);
       }
     }
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, []);
 
-  // Focus search input when dropdown opens
   useEffect(() => {
-    if (isOpen && !showCreate) {
-      setTimeout(() => searchInputRef.current?.focus(), 40);
-    }
-    if (showCreate) {
-      setTimeout(() => nameInputRef.current?.focus(), 40);
-    }
+    if (isOpen && !showCreate) setTimeout(() => searchInputRef.current?.focus(), 40);
+    if (showCreate) setTimeout(() => nameInputRef.current?.focus(), 40);
   }, [isOpen, showCreate]);
 
   function open() {
     if (disabled) return;
-    setSearch('');
-    setShowCreate(false);
-    setIsOpen(true);
+    setSearch(''); setShowCreate(false); setIsOpen(true);
   }
 
   function close() {
-    setIsOpen(false);
-    setSearch('');
-    setShowCreate(false);
-    resetCreateForm();
+    setIsOpen(false); setSearch(''); setShowCreate(false); resetCreateForm();
   }
 
   function resetCreateForm() {
-    setNewName('');
-    setNewType('DISTRIBUTOR');
-    setNewPhone('');
-    setNewEmail('');
-    setCreateError('');
-    setCreating(false);
+    setNewName(''); setNewType('DISTRIBUTOR'); setNewPhone('');
+    setNewPricePerMeter(''); setCreateError(''); setCreating(false);
   }
 
   function handleSelect(c: ComboClient) {
-    onChange(String(c.id));
-    close();
+    onChange(String(c.id)); close();
   }
 
   function handleStartCreate() {
-    setNewName(trimmedSearch);
-    setCreateError('');
-    setShowCreate(true);
+    setNewName(trimmedSearch); setCreateError(''); setShowCreate(true);
   }
 
   async function handleCreate() {
-    if (!newName.trim()) {
-      setCreateError('El nombre es requerido');
-      return;
+    if (!newName.trim()) { setCreateError('El nombre es requerido'); return; }
+    if (newType === 'DISTRIBUTOR' && (!newPricePerMeter || parseFloat(newPricePerMeter) <= 0)) {
+      setCreateError('El precio por metro es requerido para clientes fijos'); return;
     }
-    setCreating(true);
-    setCreateError('');
+    setCreating(true); setCreateError('');
     try {
       const res = await fetch('/api/clients', {
         method: 'POST',
@@ -130,15 +108,15 @@ export default function ClientCombobox({
           name: newName.trim(),
           type: newType,
           phone: newPhone.trim() || null,
-          email: newEmail.trim() || null,
+          pricePerMeter: newType === 'DISTRIBUTOR' ? parseFloat(newPricePerMeter) : null,
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setCreateError(data.error ?? 'Error al crear cliente');
-        return;
-      }
-      const newClient: ComboClient = { id: data.id, name: data.name, type: data.type };
+      if (!res.ok) { setCreateError(data.error ?? 'Error al crear cliente'); return; }
+      const newClient: ComboClient = {
+        id: data.id, name: data.name, type: data.type,
+        pricePerMeter: data.pricePerMeter ?? null,
+      };
       onClientCreated(newClient);
       onChange(String(newClient.id));
       close();
@@ -151,11 +129,8 @@ export default function ClientCombobox({
 
   return (
     <div ref={containerRef} className="relative">
-      {/* Trigger button */}
       <button
-        type="button"
-        onClick={open}
-        disabled={disabled}
+        type="button" onClick={open} disabled={disabled}
         className="w-full flex items-center justify-between border border-[#E5E5E5] rounded px-3 py-2.5 text-sm text-left bg-white focus:outline-none focus:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed hover:border-gray-300 transition-colors"
       >
         <span className={selectedClient ? 'text-gray-900' : 'text-gray-400'}>
@@ -166,147 +141,89 @@ export default function ClientCombobox({
         <span className="text-gray-400 ml-2 flex-shrink-0">▾</span>
       </button>
 
-      {/* Dropdown */}
       {isOpen && (
         <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-[#E5E5E5] rounded-lg shadow-xl z-[60] flex flex-col overflow-hidden">
           {!showCreate ? (
             <>
-              {/* Search */}
               <div className="p-2 border-b border-[#E5E5E5] flex-shrink-0">
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
+                <input ref={searchInputRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="Buscar cliente..."
-                  className="w-full px-3 py-2 text-sm border border-[#E5E5E5] rounded focus:outline-none focus:border-gray-400"
-                />
+                  className="w-full px-3 py-2 text-sm border border-[#E5E5E5] rounded focus:outline-none focus:border-gray-400" />
               </div>
-
-              {/* Options list */}
               <div className="overflow-y-auto max-h-48">
                 {filtered.length === 0 && !showCreateOption && (
-                  <p className="px-4 py-3 text-sm text-gray-400 text-center">
-                    No hay resultados
-                  </p>
+                  <p className="px-4 py-3 text-sm text-gray-400 text-center">No hay resultados</p>
                 )}
                 {filtered.map(c => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => handleSelect(c)}
-                    className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 min-h-[44px] flex flex-col justify-center transition-colors ${
-                      String(c.id) === value ? 'bg-gray-50' : ''
-                    }`}
-                  >
+                  <button key={c.id} type="button" onClick={() => handleSelect(c)}
+                    className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 min-h-[44px] flex flex-col justify-center transition-colors ${String(c.id) === value ? 'bg-gray-50' : ''}`}>
                     <span className="font-medium text-gray-900 leading-tight">{c.name}</span>
-                    <span className="text-xs text-gray-400">{TYPE_LABEL[c.type] ?? c.type}</span>
+                    <span className="text-xs text-gray-400">
+                      {TYPE_LABEL[c.type] ?? c.type}
+                      {c.type === 'DISTRIBUTOR' && c.pricePerMeter
+                        ? ` · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(c.pricePerMeter)}/m`
+                        : ''}
+                    </span>
                   </button>
                 ))}
                 {showCreateOption && (
-                  <button
-                    type="button"
-                    onClick={handleStartCreate}
-                    className="w-full text-left px-4 py-3 text-sm text-blue-600 hover:bg-blue-50 min-h-[44px] flex items-center gap-2 border-t border-[#E5E5E5] transition-colors"
-                  >
+                  <button type="button" onClick={handleStartCreate}
+                    className="w-full text-left px-4 py-3 text-sm text-blue-600 hover:bg-blue-50 min-h-[44px] flex items-center gap-2 border-t border-[#E5E5E5] transition-colors">
                     <span className="font-bold text-base leading-none">+</span>
-                    <span>
-                      Crear &ldquo;<span className="font-semibold">{trimmedSearch}</span>&rdquo;
-                    </span>
+                    <span>Crear &ldquo;<span className="font-semibold">{trimmedSearch}</span>&rdquo;</span>
                   </button>
                 )}
               </div>
             </>
           ) : (
-            /* Mini create form */
             <div className="p-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-semibold text-gray-900">Nuevo cliente</p>
-                <button
-                  type="button"
-                  onClick={() => setShowCreate(false)}
-                  className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-                >
-                  ✕
-                </button>
+                <button type="button" onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
               </div>
-
               <div className="space-y-2.5">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Nombre <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    ref={nameInputRef}
-                    type="text"
-                    value={newName}
-                    onChange={e => setNewName(e.target.value)}
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Nombre <span className="text-red-400">*</span></label>
+                  <input ref={nameInputRef} type="text" value={newName} onChange={e => setNewName(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleCreate()}
                     className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                    placeholder="Nombre del cliente"
-                  />
+                    placeholder="Nombre del cliente" />
                 </div>
-
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Tipo</label>
-                  <select
-                    value={newType}
-                    onChange={e => setNewType(e.target.value as 'DISTRIBUTOR' | 'DECORATOR')}
-                    className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                  >
-                    <option value="DISTRIBUTOR">Distribuidor</option>
-                    <option value="DECORATOR">Decorador</option>
+                  <select value={newType} onChange={e => setNewType(e.target.value as 'DISTRIBUTOR' | 'DECORATOR')}
+                    className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
+                    <option value="DISTRIBUTOR">Fijo (precio fijo por metro)</option>
+                    <option value="DECORATOR">Ocasional</option>
                   </select>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Teléfono{' '}
-                    <span className="text-gray-400 font-normal">(opcional)</span>
-                  </label>
-                  <input
-                    type="tel"
-                    value={newPhone}
-                    onChange={e => setNewPhone(e.target.value)}
-                    className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                    placeholder="300 000 0000"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Correo{' '}
-                    <span className="text-gray-400 font-normal">(opcional)</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={newEmail}
-                    onChange={e => setNewEmail(e.target.value)}
-                    className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                    placeholder="correo@ejemplo.com"
-                  />
-                </div>
-
-                {createError && (
-                  <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded px-3 py-1.5">
-                    {createError}
-                  </p>
+                {newType === 'DISTRIBUTOR' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Precio por metro <span className="text-red-400">*</span>
+                    </label>
+                    <input type="number" step="100" min="1" value={newPricePerMeter}
+                      onChange={e => setNewPricePerMeter(e.target.value)}
+                      className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                      placeholder="Ej. 25000" />
+                  </div>
                 )}
-
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Teléfono <span className="text-gray-400 font-normal">(opcional)</span></label>
+                  <input type="tel" value={newPhone} onChange={e => setNewPhone(e.target.value)}
+                    className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                    placeholder="300 000 0000" />
+                </div>
+                {createError && (
+                  <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded px-3 py-1.5">{createError}</p>
+                )}
                 <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreate(false)}
-                    className="flex-1 border border-[#E5E5E5] rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                  >
+                  <button type="button" onClick={() => setShowCreate(false)}
+                    className="flex-1 border border-[#E5E5E5] rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
                     ← Volver
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleCreate}
-                    disabled={creating || !newName.trim()}
-                    className="flex-1 bg-[#0A0A0A] text-white rounded px-3 py-2 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-50 transition-colors"
-                  >
+                  <button type="button" onClick={handleCreate} disabled={creating || !newName.trim()}
+                    className="flex-1 bg-[#0A0A0A] text-white rounded px-3 py-2 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-50 transition-colors">
                     {creating ? 'Guardando...' : 'Guardar'}
                   </button>
                 </div>

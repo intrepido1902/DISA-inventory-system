@@ -1,12 +1,33 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { getBlackoutColorName, isBlackoutProduct } from '@/lib/colorMap';
 
 interface Product {
   id: number; name: string; code: string; color: string; width: number;
   priceOwner: number; priceB2B: number; priceB2C: number;
   category: { id: number; name: string };
   activeRolls: number; totalMeters: number;
+}
+
+// Cambio 9: format reference — Blackout "2306-2", Velo "2238"
+function formatRef(code: string, isBlackout: boolean): string {
+  const parts = code.split('-');
+  return isBlackout ? `${parts[0]}-${parts[1] ?? ''}` : parts[0];
+}
+
+// Strip the base code number from the product name
+function productDisplayName(name: string, code: string): string {
+  const base = code.split('-')[0];
+  const cleaned = name.replace(new RegExp(`\\b${base}\\b`, 'g'), '').trim().replace(/\s+/g, ' ');
+  return cleaned || name;
+}
+
+function displayColor(product: Product): string {
+  if (isBlackoutProduct(product.category.name)) {
+    return getBlackoutColorName(product.color);
+  }
+  return product.color;
 }
 
 export default function CatalogClient({ products, isOwner }: { products: Product[]; isOwner: boolean }) {
@@ -20,7 +41,7 @@ export default function CatalogClient({ products, isOwner }: { products: Product
       const matchSearch = !q ||
         p.name.toLowerCase().includes(q) ||
         p.code.toLowerCase().includes(q) ||
-        p.color.toLowerCase().includes(q);
+        displayColor(p).toLowerCase().includes(q);
       return matchCat && matchSearch;
     });
   }, [products, categoryFilter, search]);
@@ -37,23 +58,18 @@ export default function CatalogClient({ products, isOwner }: { products: Product
 
       <div className="flex flex-wrap gap-3 mb-6">
         <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, código, color..."
+          type="text" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar por nombre, referencia, color..."
           className="flex-1 min-w-48 border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
         />
         <div className="flex gap-2">
           {['', 'Velo', 'Blackout'].map(cat => (
-            <button
-              key={cat}
-              onClick={() => setCategoryFilter(cat)}
+            <button key={cat} onClick={() => setCategoryFilter(cat)}
               className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
                 categoryFilter === cat
                   ? 'bg-[#0A0A0A] text-white'
                   : 'bg-white border border-[#E5E5E5] text-gray-600 hover:bg-gray-50'
-              }`}
-            >
+              }`}>
               {cat || 'Todos'}
             </button>
           ))}
@@ -62,8 +78,12 @@ export default function CatalogClient({ products, isOwner }: { products: Product
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
         {filtered.map(product => {
+          const isBlackout = isBlackoutProduct(product.category.name);
+          const ref = formatRef(product.code, isBlackout);
+          const pName = productDisplayName(product.name, product.code);
+          const color = displayColor(product);
           const hasStock = product.totalMeters > 0;
-          const lowStock = product.totalMeters > 0 && product.totalMeters < 100;
+          const lowStock = product.activeRolls > 0 && product.activeRolls < 5;
 
           return (
             <div
@@ -71,12 +91,10 @@ export default function CatalogClient({ products, isOwner }: { products: Product
               className={`bg-white rounded-lg border p-4 flex flex-col gap-3 ${lowStock ? 'border-amber-300' : 'border-[#E5E5E5]'}`}
             >
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      product.category.name === 'Velo'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-gray-900 text-white'
+                      isBlackout ? 'bg-gray-900 text-white' : 'bg-blue-50 text-blue-600'
                     }`}>
                       {product.category.name}
                     </span>
@@ -91,11 +109,11 @@ export default function CatalogClient({ products, isOwner }: { products: Product
                       </span>
                     )}
                   </div>
-                  <h3 className="font-semibold text-gray-900 mt-2 text-sm leading-snug">{product.name}</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">{product.color}</p>
+                  <h3 className="font-semibold text-gray-900 mt-2 text-sm leading-snug">{pName}</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">{color}</p>
                 </div>
                 <span className="text-xs font-mono text-gray-400 bg-gray-50 px-2 py-1 rounded border border-[#E5E5E5] whitespace-nowrap flex-shrink-0">
-                  {product.code}
+                  {ref}
                 </span>
               </div>
 
@@ -145,9 +163,7 @@ export default function CatalogClient({ products, isOwner }: { products: Product
       </div>
 
       {filtered.length === 0 && (
-        <div className="text-center py-16 text-gray-400 text-sm">
-          No se encontraron productos
-        </div>
+        <div className="text-center py-16 text-gray-400 text-sm">No se encontraron productos</div>
       )}
     </div>
   );

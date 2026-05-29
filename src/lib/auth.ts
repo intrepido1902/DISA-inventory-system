@@ -68,6 +68,10 @@ export function canManageClients(role: Role): boolean {
   return role === 'OWNER' || role === 'ADMIN';
 }
 
+export function canRevertSale(role: Role): boolean {
+  return role === 'OWNER' || role === 'ADMIN';
+}
+
 export function canSeeCatalog(role: Role): boolean {
   return role === 'OWNER' || role === 'ADMIN';
 }
