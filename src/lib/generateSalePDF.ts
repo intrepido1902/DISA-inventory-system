@@ -1,10 +1,18 @@
 import jsPDF from 'jspdf';
 
 export interface SalePDFData {
-  cliente: { nombre: string; tipo: string };
-  rollo: { consecutivo: string; referencia: string; color: string; ancho: number; metros: number };
-  precio: { precioMetro: number; descuento: number; subtotal: number; total: number };
-  venta: { fecha: string; hora: string; movimientoId: number; registradoPor: string };
+  cliente: { nombre: string };
+  rollos: Array<{
+    consecutivo: string;
+    referencia: string;
+    color: string;
+    ancho: number;
+    metros: number;
+    precioMetro: number;
+    subtotal: number;
+  }>;
+  precio: { descuento: number; subtotalGeneral: number; total: number };
+  venta: { fecha: string; hora: string; documentId: number; registradoPor: string };
 }
 
 function formatCOP(n: number): string {
@@ -20,7 +28,7 @@ const MARGIN = 6;
 const LINE_H = 5.5;
 
 export function generateSalePDF(data: SalePDFData): void {
-  const doc = new jsPDF({ unit: 'mm', format: [PAGE_W, 200], orientation: 'portrait' });
+  const doc = new jsPDF({ unit: 'mm', format: [PAGE_W, 300], orientation: 'portrait' });
   let y = MARGIN;
 
   function hRule() {
@@ -79,29 +87,41 @@ export function generateSalePDF(data: SalePDFData): void {
   // ── Cliente ─────────────────────────────────────────────────────
   heading('CLIENTE');
   row('Nombre:', data.cliente.nombre);
-  row('Tipo:', (data.cliente.tipo === 'DISTRIBUTOR' || data.cliente.tipo === 'FIXED') ? 'Cliente Fijo' : 'Cliente Ocasional');
 
   hRule();
 
-  // ── Rollo ───────────────────────────────────────────────────────
-  heading('DETALLE DEL ROLLO');
-  row('Consecutivo:', data.rollo.consecutivo);
-  row('Referencia:', data.rollo.referencia);
-  row('Color:', data.rollo.color);
-  row('Ancho:', `${data.rollo.ancho} cm`);
-  row('Metros:', `${data.rollo.metros} m`);
+  // ── Rollos ──────────────────────────────────────────────────────
+  const esMultiple = data.rollos.length > 1;
+  heading(esMultiple ? `DETALLE — ${data.rollos.length} ROLLOS` : 'DETALLE DEL ROLLO');
+
+  data.rollos.forEach((rollo, i) => {
+    if (esMultiple && i > 0) {
+      doc.setDrawColor(210);
+      doc.setLineWidth(0.1);
+      doc.line(MARGIN + 4, y - 1, PAGE_W - MARGIN - 4, y - 1);
+      y += 1;
+    }
+    row('Consecutivo:', rollo.consecutivo);
+    row('Referencia:', rollo.referencia);
+    row('Color:', rollo.color);
+    row('Ancho:', `${rollo.ancho} cm`);
+    row('Metros:', `${rollo.metros} m`);
+    row('Precio/m:', formatCOP(rollo.precioMetro));
+    if (esMultiple) {
+      row('Subtotal:', formatCOP(rollo.subtotal));
+    }
+  });
 
   hRule();
 
   // ── Precio ──────────────────────────────────────────────────────
   heading('PRECIO');
-  row('Precio/m:', formatCOP(data.precio.precioMetro));
 
   if (data.precio.descuento > 0) {
+    row('Subtotal:', formatCOP(data.precio.subtotalGeneral));
     row('Descuento:', `${data.precio.descuento}%`);
-    row('Subtotal:', formatCOP(data.precio.subtotal));
-    const dtoAmount = data.precio.subtotal - data.precio.total;
-    row('Descuento (–):', formatCOP(dtoAmount));
+    const dtoAmount = data.precio.subtotalGeneral - data.precio.total;
+    row('Ahorro (–):', formatCOP(dtoAmount));
   }
 
   y += 1;
@@ -121,7 +141,7 @@ export function generateSalePDF(data: SalePDFData): void {
 
   // ── Footer ──────────────────────────────────────────────────────
   row('Registrado por:', data.venta.registradoPor);
-  row('Mov. N°:', String(data.venta.movimientoId));
+  row('Venta N°:', String(data.venta.documentId));
 
   y += 3;
   doc.setFontSize(7.5);
@@ -130,5 +150,6 @@ export function generateSalePDF(data: SalePDFData): void {
   doc.text('Gracias por su compra', PAGE_W / 2, y, { align: 'center' });
 
   const safeFecha = data.venta.fecha.replace(/\//g, '-');
-  doc.save(`DISA-Salida-${data.rollo.consecutivo}-${safeFecha}.pdf`);
+  const suffix = data.rollos[0]?.consecutivo ?? String(data.venta.documentId);
+  doc.save(`DISA-Salida-${suffix}-${safeFecha}.pdf`);
 }
