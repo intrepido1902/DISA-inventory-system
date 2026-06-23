@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 const DEMO_USERS = [
   { email: 'samir@disa.co', password: 'admin2026', label: 'Socio', role: 'OWNER' },
   { email: 'william@disa.co', password: 'william2026', label: 'Socio', role: 'OWNER' },
-  { email: 'admin@disa.co', password: 'admin2026', label: 'Admin', role: 'ADMIN' },
+  { email: 'admin@disa.co', password: 'admin2026', label: 'Adriana', role: 'ADMIN' },
   { email: 'bodega@disa.co', password: 'bodega2026', label: 'Bodega', role: 'WAREHOUSE' },
 ];
 

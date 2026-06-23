@@ -7,6 +7,7 @@ export interface ComboClient {
   name: string;
   type: string;
   pricePerMeter?: number | null;
+  sellsByRoll?: boolean;
 }
 
 interface ClientComboboxProps {
@@ -16,12 +17,17 @@ interface ClientComboboxProps {
   onClientCreated: (client: ComboClient) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Reference base (e.g. "2306") used when creating a new DISTRIBUTOR client
+   *  to prompt for a per-ref price and store it in ClientPrice. */
+  productRef?: string;
 }
 
-// DISTRIBUTOR = Fijo, DECORATOR = Ocasional
 const TYPE_LABEL: Record<string, string> = {
   DISTRIBUTOR: 'Fijo',
   DECORATOR: 'Ocasional',
+  FIXED: 'Fijo',
+  OCCASIONAL: 'Ocasional',
+  GENERAL: 'General',
 };
 
 export default function ClientCombobox({
@@ -31,6 +37,7 @@ export default function ClientCombobox({
   onClientCreated,
   placeholder = 'Seleccionar cliente',
   disabled = false,
+  productRef,
 }: ClientComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -39,7 +46,8 @@ export default function ClientCombobox({
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'DISTRIBUTOR' | 'DECORATOR'>('DISTRIBUTOR');
   const [newPhone, setNewPhone] = useState('');
-  const [newPricePerMeter, setNewPricePerMeter] = useState('');
+  const [newSellsByRoll, setNewSellsByRoll] = useState(false);
+  const [newPriceForRef, setNewPriceForRef] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -83,7 +91,7 @@ export default function ClientCombobox({
 
   function resetCreateForm() {
     setNewName(''); setNewType('DISTRIBUTOR'); setNewPhone('');
-    setNewPricePerMeter(''); setCreateError(''); setCreating(false);
+    setNewSellsByRoll(false); setNewPriceForRef(''); setCreateError(''); setCreating(false);
   }
 
   function handleSelect(c: ComboClient) {
@@ -96,11 +104,9 @@ export default function ClientCombobox({
 
   async function handleCreate() {
     if (!newName.trim()) { setCreateError('El nombre es requerido'); return; }
-    if (newType === 'DISTRIBUTOR' && (!newPricePerMeter || parseFloat(newPricePerMeter) <= 0)) {
-      setCreateError('El precio por metro es requerido para clientes fijos'); return;
-    }
     setCreating(true); setCreateError('');
     try {
+      // 1. Create the client
       const res = await fetch('/api/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -108,14 +114,28 @@ export default function ClientCombobox({
           name: newName.trim(),
           type: newType,
           phone: newPhone.trim() || null,
-          pricePerMeter: newType === 'DISTRIBUTOR' ? parseFloat(newPricePerMeter) : null,
+          sellsByRoll: newType === 'DISTRIBUTOR' ? newSellsByRoll : false,
+          pricePerMeter: null, // prices now live in ClientPrice per-ref
         }),
       });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error ?? 'Error al crear cliente'); return; }
+
+      // 2. If DISTRIBUTOR + productRef + price entered: also create the per-ref price
+      if (newType === 'DISTRIBUTOR' && productRef && newPriceForRef && parseFloat(newPriceForRef) > 0) {
+        await fetch(`/api/clients/${data.id}/prices`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productRef, pricePerMeter: parseFloat(newPriceForRef) }),
+        });
+      }
+
       const newClient: ComboClient = {
-        id: data.id, name: data.name, type: data.type,
+        id: data.id,
+        name: data.name,
+        type: data.type,
         pricePerMeter: data.pricePerMeter ?? null,
+        sellsByRoll: Boolean(data.sellsByRoll),
       };
       onClientCreated(newClient);
       onChange(String(newClient.id));
@@ -160,9 +180,7 @@ export default function ClientCombobox({
                     <span className="font-medium text-gray-900 leading-tight">{c.name}</span>
                     <span className="text-xs text-gray-400">
                       {TYPE_LABEL[c.type] ?? c.type}
-                      {c.type === 'DISTRIBUTOR' && c.pricePerMeter
-                        ? ` · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(c.pricePerMeter)}/m`
-                        : ''}
+                      {c.type === 'DISTRIBUTOR' && c.sellsByRoll ? ' · por rollo' : ''}
                     </span>
                   </button>
                 ))}
@@ -191,22 +209,31 @@ export default function ClientCombobox({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Tipo</label>
-                  <select value={newType} onChange={e => setNewType(e.target.value as 'DISTRIBUTOR' | 'DECORATOR')}
+                  <select value={newType} onChange={e => { setNewType(e.target.value as 'DISTRIBUTOR' | 'DECORATOR'); setNewSellsByRoll(false); }}
                     className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
-                    <option value="DISTRIBUTOR">Fijo (precio fijo por metro)</option>
+                    <option value="DISTRIBUTOR">Fijo (precio acordado)</option>
                     <option value="DECORATOR">Ocasional</option>
                   </select>
                 </div>
                 {newType === 'DISTRIBUTOR' && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Precio por metro <span className="text-red-400">*</span>
+                  <>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={newSellsByRoll} onChange={e => setNewSellsByRoll(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300" />
+                      <span className="text-xs text-gray-700">Vende por rollo completo</span>
                     </label>
-                    <input type="number" step="100" min="1" value={newPricePerMeter}
-                      onChange={e => setNewPricePerMeter(e.target.value)}
-                      className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                      placeholder="Ej. 25000" />
-                  </div>
+                    {productRef && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Precio para ref. <span className="font-mono">{productRef}</span> <span className="text-gray-400 font-normal">(opcional)</span>
+                        </label>
+                        <input type="number" step="100" min="1" value={newPriceForRef}
+                          onChange={e => setNewPriceForRef(e.target.value)}
+                          className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                          placeholder="Ej. 38000" />
+                      </div>
+                    )}
+                  </>
                 )}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Teléfono <span className="text-gray-400 font-normal">(opcional)</span></label>
