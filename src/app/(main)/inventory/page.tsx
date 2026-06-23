@@ -5,6 +5,7 @@ import InventoryClient from './client';
 const ROLL_SELECT = `
   id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
   location, status, isRemnant, updatedAt,
+  hasDefect, defectNote, defectDiscountPct,
   product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
     category:categoryId(id, name)
   ),
@@ -23,6 +24,9 @@ function mapRoll(r: any) {
     status: r.status as string,
     isRemnant: Boolean(r.isRemnant),
     updatedAt: r.updatedAt as number,
+    hasDefect: Boolean(r.hasDefect),
+    defectNote: (r.defectNote ?? null) as string | null,
+    defectDiscountPct: (r.defectDiscountPct ?? null) as number | null,
     product: {
       id: r.product?.id as number,
       name: r.product?.name as string,

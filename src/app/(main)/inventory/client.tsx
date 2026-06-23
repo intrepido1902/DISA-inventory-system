@@ -20,6 +20,9 @@ interface Roll {
   status: string;
   isRemnant: boolean;
   updatedAt: number;
+  hasDefect: boolean;
+  defectNote: string | null;
+  defectDiscountPct: number | null;
   product: {
     id: number; name: string; code: string;
     color: string; width: number;
@@ -805,6 +808,11 @@ export default function InventoryClient({
                         <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CLASS[roll.status] ?? 'bg-gray-100 text-gray-600'}`}>
                           {STATUS_LABEL[roll.status] ?? roll.status}
                         </span>
+                        {roll.hasDefect && (
+                          <span className="inline-block text-[10px] bg-orange-100 text-orange-700 font-medium px-1.5 py-0.5 rounded-full ml-1" title={roll.defectNote ?? 'Defecto aprobado'}>
+                            ⚠️ Defecto
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{roll.location}</td>
                       {isOwner && (
@@ -879,9 +887,16 @@ export default function InventoryClient({
                       : <span className="text-gray-400 text-sm font-mono">Sin Consecutivo</span>}
                     <span className="text-gray-400 text-xs ml-2">No. {displayRollNumber(roll.rollNumber)}</span>
                   </div>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CLASS[roll.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                    {STATUS_LABEL[roll.status] ?? roll.status}
-                  </span>
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
+                    {roll.hasDefect && (
+                      <span className="text-[10px] bg-orange-100 text-orange-700 font-medium px-1.5 py-0.5 rounded-full" title={roll.defectNote ?? 'Defecto aprobado'}>
+                        ⚠️ Defecto
+                      </span>
+                    )}
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CLASS[roll.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                      {STATUS_LABEL[roll.status] ?? roll.status}
+                    </span>
+                  </div>
                 </div>
                 <div className="text-sm text-gray-800 font-medium">{pName}</div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 mt-1">
@@ -999,7 +1014,10 @@ export default function InventoryClient({
                             <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{r.disaNumber ?? '—'}</span>
                             <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
                             <span className="col-span-3 text-gray-500 truncate">{color}</span>
-                            <span className="col-span-3 text-right font-semibold text-green-700">{r.currentMeters}m</span>
+                            <span className="col-span-3 text-right">
+                              {r.hasDefect && <span className="inline-block text-[9px] bg-orange-100 text-orange-700 rounded px-1 mr-1">⚠️ Def.</span>}
+                              <span className="font-semibold text-green-700">{r.currentMeters}m</span>
+                            </span>
                           </button>
                         );
                       })}
@@ -1023,6 +1041,7 @@ export default function InventoryClient({
                             <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
                             <span className="col-span-3 text-gray-500 truncate">{color}</span>
                             <span className="col-span-3 text-right">
+                              {r.hasDefect && <span className="inline-block text-[9px] bg-orange-100 text-orange-700 rounded px-1 mr-1">⚠️ Def.</span>}
                               <span className="font-semibold text-amber-600">{r.currentMeters}m</span>
                               <span className="text-gray-300"> /{r.initialMeters}m</span>
                             </span>
@@ -1044,7 +1063,15 @@ export default function InventoryClient({
                         Cancelar
                       </button>
                       <button type="button"
-                        onClick={() => setExitStep('confirm')}
+                        onClick={() => {
+                          setExitStep('confirm');
+                          if (!exitDiscount) {
+                            const pcts = selectedRolls
+                              .filter(r => r.hasDefect && r.defectDiscountPct !== null)
+                              .map(r => r.defectDiscountPct as number);
+                            if (pcts.length > 0) setExitDiscount(String(Math.max(...pcts)));
+                          }
+                        }}
                         disabled={selectedRolls.length === 0}
                         className="bg-[#0A0A0A] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-40">
                         Continuar →
@@ -1143,6 +1170,15 @@ export default function InventoryClient({
                               </button>
                             </div>
                           </div>
+
+                          {/* Defect notice */}
+                          {roll.hasDefect && (
+                            <div className="bg-orange-50 border border-orange-200 rounded px-2.5 py-1.5 text-xs text-orange-800">
+                              ⚠️ <span className="font-semibold">Defecto aprobado</span>
+                              {roll.defectDiscountPct && <> · Descuento sugerido: <span className="font-bold">{roll.defectDiscountPct}%</span></>}
+                              {roll.defectNote && <> · {roll.defectNote}</>}
+                            </div>
+                          )}
 
                           {/* Metros + precio */}
                           {forceFull ? (

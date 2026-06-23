@@ -7,6 +7,7 @@ import { formatColombianDate } from '@/lib/dateUtils';
 import ReimprimirButton from './ReimprimirButton';
 import RollLabelButton from './RollLabelButton';
 import DefectButton from './DefectButton';
+import ClearDefectButton from './ClearDefectButton';
 
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'Activo',
@@ -77,6 +78,7 @@ export default async function RollTracePage({
   const rollRes = await dbAny.from('Roll').select(`
     id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
     location, status, isRemnant, createdAt,
+    hasDefect, defectNote, defectDiscountPct,
     product:productId(id, name, code, color, width,
       category:categoryId(id, name)
     ),
@@ -172,7 +174,10 @@ export default async function RollTracePage({
       <div className="bg-white border border-[#E5E5E5] rounded-lg p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ficha del rollo</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {Boolean(r.hasDefect) && session!.role === 'OWNER' && (
+              <ClearDefectButton rollId={rollIdNum} />
+            )}
             {(r.status === 'ACTIVE' || r.status === 'REMNANT') && (
               <DefectButton
                 rollId={rollIdNum}
@@ -215,6 +220,26 @@ export default async function RollTracePage({
           ))}
         </div>
       </div>
+
+      {/* Permanent defect banner */}
+      {Boolean(r.hasDefect) && (
+        <div className="bg-orange-50 border border-orange-200 rounded-lg px-5 py-4 mb-6">
+          <div className="flex items-start gap-3">
+            <span className="text-xl flex-shrink-0">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-orange-900">Defecto activo — venta con descuento</p>
+              {(r.defectDiscountPct as number | null) && (
+                <p className="text-sm text-orange-800 mt-0.5">
+                  Descuento sugerido: <span className="font-bold">{r.defectDiscountPct}%</span>
+                </p>
+              )}
+              {(r.defectNote as string | null) && (
+                <p className="text-xs text-orange-700 mt-1 italic">{r.defectNote}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Timeline */}
       <div className="bg-white border border-[#E5E5E5] rounded-lg p-5">

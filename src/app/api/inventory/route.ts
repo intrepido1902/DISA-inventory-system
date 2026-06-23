@@ -10,6 +10,7 @@ const REVERSE_BLACKOUT: Record<string, string> = Object.fromEntries(
 const ROLL_SELECT = `
   id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
   location, status, isRemnant, createdAt, updatedAt,
+  hasDefect, defectNote, defectDiscountPct,
   product:productId(id, name, code, color, width, priceOwner, priceB2B, priceB2C,
     category:categoryId(id, name)
   ),
@@ -29,6 +30,9 @@ function mapRoll(r: any) {
     isRemnant: Boolean(r.isRemnant),
     createdAt: r.createdAt as number,
     updatedAt: r.updatedAt as number,
+    hasDefect: Boolean(r.hasDefect),
+    defectNote: (r.defectNote ?? null) as string | null,
+    defectDiscountPct: (r.defectDiscountPct ?? null) as number | null,
     product: {
       id: r.product?.id as number,
       name: r.product?.name as string,
