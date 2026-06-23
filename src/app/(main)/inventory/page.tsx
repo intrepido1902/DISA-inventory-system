@@ -49,7 +49,7 @@ async function getInventoryData(isRemnantTab: boolean) {
 
   const [rollsRes, clientsRes, productsRes, lotsRes, remCountRes, activeCountRes] = await Promise.all([
     rollQuery.range(0, 99),
-    db.from('Client').select('id, name, type, pricePerMeter').eq('active', 1).order('name', { ascending: true }),
+    db.from('Client').select('id, name, type, sellsByRoll').eq('active', 1).order('name', { ascending: true }),
     db.from('Product').select('id, name, code, color, width, categoryId').eq('active', 1).order('name', { ascending: true }),
     db.from('ImportLot').select('id, lotNumber').order('importDate', { ascending: false }),
     db.from('Roll').select('id', { count: 'exact', head: true }).eq('status', 'REMNANT'),
@@ -69,7 +69,7 @@ async function getInventoryData(isRemnantTab: boolean) {
       id: r.id as number,
       name: r.name as string,
       type: r.type as string,
-      pricePerMeter: (r.pricePerMeter ?? null) as number | null,
+      sellsByRoll: Boolean(r.sellsByRoll),
     })),
     products: (productsRes.data ?? []).map((r: any) => ({
       id: r.id as number,
@@ -117,6 +117,7 @@ export default async function InventoryPage({
       products={data.products}
       lots={data.lots}
       userRole={session!.role}
+      userName={session!.name}
       initialTab={isRemnantTab ? 'remnants' : 'all'}
       openExitModal={sp.exitModal === '1'}
       initialSearch={sp.q ?? ''}
