@@ -17,7 +17,7 @@ export async function POST(
   try {
     const dbAny = db as any;
     const movRes: any = await dbAny.from('Movement')
-      .select('id, type, rollId, meters, approvalStatus')
+      .select('id, type, rollId, meters, approvalStatus, notes, defectDiscountPct')
       .eq('id', movIdNum)
       .single();
 
@@ -36,7 +36,6 @@ export async function POST(
       approvedAt: now,
     }).eq('id', movIdNum);
 
-    // Update Roll based on movement type
     if (mov.type === 'WRITE_OFF') {
       const rollRes: any = await dbAny.from('Roll').select('currentMeters').eq('id', mov.rollId).single();
       const prev = rollRes.data?.currentMeters ?? 0;
@@ -52,8 +51,14 @@ export async function POST(
         status: 'DEFECTIVE',
         updatedAt: now,
       }).eq('id', mov.rollId);
+    } else if (mov.type === 'DEFECT_DISCOUNT') {
+      await dbAny.from('Roll').update({
+        hasDefect: true,
+        defectNote: mov.notes ?? null,
+        defectDiscountPct: mov.defectDiscountPct ?? null,
+        updatedAt: now,
+      }).eq('id', mov.rollId);
     }
-    // DEFECT_DISCOUNT: no Roll status change
 
     await dbAny.from('AuditLog').insert({
       userId: session.userId,
@@ -61,7 +66,10 @@ export async function POST(
       entity: 'Roll',
       entityId: mov.rollId,
       oldData: JSON.stringify({ approvalStatus: 'PENDING' }),
-      newData: JSON.stringify({ approvalStatus: 'APPROVED', approvedBy: session.userId }),
+      newData: JSON.stringify({
+        approvalStatus: 'APPROVED', approvedBy: session.userId,
+        ...(mov.type === 'DEFECT_DISCOUNT' ? { hasDefect: true, defectDiscountPct: mov.defectDiscountPct } : {}),
+      }),
       createdAt: now,
     });
 

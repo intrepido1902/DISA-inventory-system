@@ -11,11 +11,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { rollId, type, notes } = body as { rollId?: number; type?: string; notes?: string };
+    const { rollId, type, notes, defectDiscountPct } = body as {
+      rollId?: number; type?: string; notes?: string; defectDiscountPct?: number | null;
+    };
 
     if (!rollId) return Response.json({ error: 'rollId es requerido' }, { status: 400 });
     if (!ALLOWED_TYPES.includes(type as DefectType)) {
       return Response.json({ error: 'Tipo inválido. Usa WRITE_OFF, DEFECT_DISCOUNT o DEFECT_REPLACEMENT' }, { status: 400 });
+    }
+    if (type === 'DEFECT_DISCOUNT' && (!defectDiscountPct || Number(defectDiscountPct) <= 0)) {
+      return Response.json({ error: 'El % de descuento es requerido para DEFECT_DISCOUNT' }, { status: 400 });
     }
 
     const dbAny = db as any;
@@ -39,6 +44,7 @@ export async function POST(request: NextRequest) {
       approvalStatus: 'PENDING',
       approvedBy: null,
       approvedAt: null,
+      defectDiscountPct: type === 'DEFECT_DISCOUNT' ? (Number(defectDiscountPct) || null) : null,
       createdAt: now,
     }).select('id').single();
 
@@ -53,7 +59,7 @@ export async function POST(request: NextRequest) {
       entity: 'Roll',
       entityId: Number(rollId),
       oldData: JSON.stringify({ status: roll.status, currentMeters: roll.currentMeters }),
-      newData: JSON.stringify({ approvalStatus: 'PENDING', type }),
+      newData: JSON.stringify({ approvalStatus: 'PENDING', type, defectDiscountPct: defectDiscountPct ?? null }),
       createdAt: now,
     });
 
