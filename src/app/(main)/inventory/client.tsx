@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ClientCombobox, { type ComboClient } from '@/components/ClientCombobox';
 import { getBlackoutColorName, isBlackoutProduct } from '@/lib/colorMap';
+import { generateSalePDF } from '@/lib/generateSalePDF';
+import { formatColombianDate } from '@/lib/dateUtils';
 
 interface Roll {
   id: number;
@@ -34,7 +36,6 @@ interface Lot { id: number; lotNumber: string }
 
 const SERVER_LIMIT = 100;
 
-// Cambio 3: REMNANT is now its own status
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'Activo',
   REMNANT: 'Remanente',
@@ -51,7 +52,7 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 function formatCOP(n: number) {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n);
 }
 
 function displayRollNumber(rollNumber: string): string {
@@ -59,13 +60,11 @@ function displayRollNumber(rollNumber: string): string {
   return isNaN(n) ? rollNumber : String(n);
 }
 
-// Cambio 2: formatted reference — Blackout shows "2306-2", Velo shows "2238"
 function formatRef(code: string, isBlackout: boolean): string {
   const parts = code.split('-');
   return isBlackout ? `${parts[0]}-${parts[1] ?? ''}` : parts[0];
 }
 
-// Strip the base code number from the product name to avoid redundancy
 function productDisplayName(name: string, code: string): string {
   const base = code.split('-')[0];
   const cleaned = name.replace(new RegExp(`\\b${base}\\b`, 'g'), '').trim().replace(/\s+/g, ' ');
@@ -73,10 +72,12 @@ function productDisplayName(name: string, code: string): string {
 }
 
 function rollColor(roll: Roll): string {
-  if (isBlackoutProduct(roll.category.name)) {
-    return getBlackoutColorName(roll.product.color);
-  }
+  if (isBlackoutProduct(roll.category.name)) return getBlackoutColorName(roll.product.color);
   return roll.product.color;
+}
+
+function baseRef(code: string): string {
+  return code.split('-')[0];
 }
 
 function updateUrl(filters: Record<string, string>) {
@@ -98,11 +99,26 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
   );
 }
 
-type ExitStep = 'product' | 'remnant-check' | 'roll' | 'confirm';
+type ExitStep = 'type-select' | 'roll-select' | 'confirm' | 'success';
+type RollKind = 'complete' | 'remnant';
+
+interface SaleResult {
+  movementId: number;
+  saleId: number;
+  clientName: string;
+  clientType: string;
+  meters: number;
+  pricePerMeter: number;
+  discount: number;
+  subtotal: number;
+  total: number;
+  roll: Roll;
+  registradoPor: string;
+}
 
 export default function InventoryClient({
   initialRolls, initialTotal, initialTotalPages, initialRemnantCount, initialActiveCount,
-  clients: initialClients, products, lots, userRole,
+  clients: initialClients, products, lots, userRole, userName,
   initialTab = 'all', openExitModal = false,
   initialSearch = '', initialCategory = '', initialStatus = '',
   initialColor = '', initialMinMeters = '', initialMaxMeters = '', initialLocation = '',
@@ -116,6 +132,7 @@ export default function InventoryClient({
   products: Product[];
   lots: Lot[];
   userRole: string;
+  userName: string;
   initialTab?: 'all' | 'remnants';
   openExitModal?: boolean;
   initialSearch?: string;
@@ -133,35 +150,39 @@ export default function InventoryClient({
   const [tab, setTab] = useState<'all' | 'remnants'>(initialTab);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Server-side pagination
   const [serverPage, setServerPage] = useState(1);
   const [serverTotal, setServerTotal] = useState(initialTotal);
   const [serverTotalPages, setServerTotalPages] = useState(initialTotalPages);
   const [isFetching, setIsFetching] = useState(false);
 
-  // Filters (4 client-side filters — no server calls on change)
   const [search, setSearch] = useState(initialSearch);
   const [categoryFilter, setCategoryFilter] = useState(initialCategory);
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [colorFilter, setColorFilter] = useState(initialColor);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
 
-  // Exit modal
+  // ── Exit modal state ─────────────────────────────────────────────────────
   const [showExit, setShowExit] = useState(openExitModal);
-  const [exitStep, setExitStep] = useState<ExitStep>('product');
-  const [exitProductId, setExitProductId] = useState('');
+  const [exitStep, setExitStep] = useState<ExitStep>('type-select');
+  const [exitRollKind, setExitRollKind] = useState<RollKind>('complete');
+  const [wizardRolls, setWizardRolls] = useState<Roll[]>([]);
+  const [wizardLoading, setWizardLoading] = useState(false);
+  const [wizardSearch, setWizardSearch] = useState('');
   const [exitRoll, setExitRoll] = useState<Roll | null>(null);
   const [exitType, setExitType] = useState<'EXIT_FULL' | 'EXIT_PARTIAL'>('EXIT_PARTIAL');
   const [exitMeters, setExitMeters] = useState('');
   const [exitClient, setExitClient] = useState('');
   const [exitPricePerMeter, setExitPricePerMeter] = useState('');
+  const [exitPriceLocked, setExitPriceLocked] = useState(false);
+  const [exitDiscount, setExitDiscount] = useState('');
+  const [showDiscountField, setShowDiscountField] = useState(false);
   const [exitNotes, setExitNotes] = useState('');
   const [exitLoading, setExitLoading] = useState(false);
-  const [remnantWarning, setRemnantWarning] = useState<Roll[]>([]);
-  const [exitPrevStep, setExitPrevStep] = useState<ExitStep>('roll');
-  const [exitProductRolls, setExitProductRolls] = useState<Roll[]>([]);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+  const [exitPriceHint, setExitPriceHint] = useState('');
+  const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
 
-  // Entry modal
+  // ── Entry modal state ────────────────────────────────────────────────────
   const [showEntry, setShowEntry] = useState(false);
   const [entryRollNumber, setEntryRollNumber] = useState('');
   const [entryDisaNumber, setEntryDisaNumber] = useState('');
@@ -177,20 +198,16 @@ export default function InventoryClient({
 
   const canManage = userRole === 'OWNER' || userRole === 'ADMIN';
   const isOwner = userRole === 'OWNER';
-
-  // Cambio 2: 10 cols (non-owner) + 1 B2B col for owner = 11
   const colCount = isOwner ? 11 : 10;
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  // Raw Product.color values (numbers for Blackout, names for Velo)
   const availableColors = useMemo(() => {
     const set = new Set<string>();
     rolls.forEach(r => { if (r.product.color) set.add(r.product.color); });
     return [...set].sort();
   }, [rolls]);
 
-  // Client-side filtering on the loaded page (no server calls)
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return rolls.filter(r => {
@@ -200,14 +217,10 @@ export default function InventoryClient({
         r.product.code,
         r.product.name,
       ].some(s => s.toLowerCase().includes(q));
-
       const matchCategory = !categoryFilter ||
         (categoryFilter === 'Velo' ? r.category.id === 1 : r.category.id === 2);
-
       const matchColor = !colorFilter || r.product.color === colorFilter;
-
       const matchStatus = !statusFilter || r.status === statusFilter;
-
       return matchSearch && matchCategory && matchColor && matchStatus;
     });
   }, [rolls, search, categoryFilter, statusFilter, colorFilter]);
@@ -215,13 +228,39 @@ export default function InventoryClient({
   const activeFilterCount = [search, categoryFilter, statusFilter, colorFilter].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
 
+  const filteredWizardRolls = useMemo(() => {
+    if (!wizardSearch.trim()) return wizardRolls;
+    const q = wizardSearch.toLowerCase().trim();
+    return wizardRolls.filter(r =>
+      (r.disaNumber ?? '').toLowerCase().includes(q) ||
+      r.product.code.toLowerCase().includes(q) ||
+      r.rollNumber.toLowerCase().includes(q)
+    );
+  }, [wizardRolls, wizardSearch]);
+
+  // Real-time price calculation
+  const exitCalc = useMemo(() => {
+    const meters = exitType === 'EXIT_FULL'
+      ? (exitRoll?.currentMeters ?? 0)
+      : parseFloat(exitMeters || '0');
+    const price = parseFloat(exitPricePerMeter || '0');
+    const disc = parseFloat(exitDiscount || '0');
+    const subtotal = meters * price;
+    const discountAmount = subtotal * (disc / 100);
+    const total = subtotal - discountAmount;
+    return { meters, price, disc, subtotal, discountAmount, total };
+  }, [exitRoll, exitType, exitMeters, exitPricePerMeter, exitDiscount]);
+
+  const selectedClient = useMemo(
+    () => clientsList.find(c => String(c.id) === exitClient) ?? null,
+    [clientsList, exitClient],
+  );
+
   // ── Effects ──────────────────────────────────────────────────────────────
 
-  // Load data on page change or tab change — no filter params sent to server
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
-      // SSR already loaded page 1, skip fetch on first mount
       if (serverPage === 1 && tab === 'all') return;
     }
     const ctrl = new AbortController();
@@ -242,7 +281,6 @@ export default function InventoryClient({
     return () => ctrl.abort();
   }, [serverPage, tab]);
 
-  // URL sync (debounced, filters only — no server call)
   useEffect(() => {
     const t = setTimeout(() => {
       updateUrl({ q: search, cat: categoryFilter, status: statusFilter, color: colorFilter, p: serverPage > 1 ? String(serverPage) : '' });
@@ -250,16 +288,67 @@ export default function InventoryClient({
     return () => clearTimeout(t);
   }, [search, categoryFilter, statusFilter, colorFilter, serverPage]);
 
-  // Auto-fill price when FIXED client is selected
+  // Auto-fetch price from ClientPrice; fallback to Cliente General for occasional clients
   useEffect(() => {
-    if (!exitClient) { setExitPricePerMeter(''); return; }
-    const client = clientsList.find(c => String(c.id) === exitClient);
-    if (client?.type === 'DISTRIBUTOR' && client.pricePerMeter) {
-      setExitPricePerMeter(String(client.pricePerMeter));
-    } else if (client?.type !== 'DISTRIBUTOR') {
+    setExitPriceHint('');
+    if (!exitClient || !exitRoll) {
       setExitPricePerMeter('');
+      setExitPriceLocked(false);
+      return;
     }
-  }, [exitClient, clientsList]);
+    const client = clientsList.find(c => String(c.id) === exitClient);
+    if (!client) return;
+
+    const isFixed = client.type === 'DISTRIBUTOR' || client.type === 'FIXED';
+    const ref = baseRef(exitRoll.product.code);
+
+    if (!isFixed) {
+      setExitPriceLocked(false);
+      const generalClient = clientsList.find(c => c.name === 'Cliente General');
+      if (generalClient) {
+        setFetchingPrice(true);
+        fetch(`/api/clients/price?clientId=${generalClient.id}&ref=${ref}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.pricePerMeter !== null && data.pricePerMeter !== undefined) {
+              setExitPricePerMeter(String(data.pricePerMeter));
+              setExitPriceHint('Precio de lista sugerido. Puedes ajustarlo.');
+            } else {
+              setExitPricePerMeter('');
+            }
+          })
+          .catch(() => {})
+          .finally(() => setFetchingPrice(false));
+      } else {
+        setExitPricePerMeter('');
+      }
+      return;
+    }
+
+    setFetchingPrice(true);
+    fetch(`/api/clients/price?clientId=${exitClient}&ref=${ref}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.pricePerMeter !== null && data.pricePerMeter !== undefined) {
+          setExitPricePerMeter(String(data.pricePerMeter));
+          setExitPriceLocked(true);
+        } else {
+          setExitPricePerMeter('');
+          setExitPriceLocked(false);
+          setExitPriceHint('Sin precio registrado para esta referencia — ingresa el precio manualmente');
+        }
+      })
+      .catch(() => { setExitPriceLocked(false); })
+      .finally(() => setFetchingPrice(false));
+  }, [exitClient, exitRoll, clientsList]);
+
+  // sellsByRoll: force EXIT_FULL
+  useEffect(() => {
+    if (!selectedClient) return;
+    if (selectedClient.sellsByRoll) {
+      setExitType('EXIT_FULL');
+    }
+  }, [selectedClient]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -270,44 +359,57 @@ export default function InventoryClient({
 
   function openExitFlow(preselectedRoll?: Roll) {
     setShowExit(true);
-    setExitStep(preselectedRoll ? 'confirm' : 'product');
-    setExitPrevStep('roll');
-    setExitProductId(preselectedRoll ? String(preselectedRoll.product.id) : '');
+    setExitStep(preselectedRoll ? 'confirm' : 'type-select');
     setExitRoll(preselectedRoll ?? null);
-    setExitProductRolls([]);
+    setExitRollKind('complete');
+    setWizardRolls([]);
+    setWizardSearch('');
     setExitType('EXIT_PARTIAL');
-    setExitMeters(''); setExitClient(''); setExitPricePerMeter(''); setExitNotes('');
-    setRemnantWarning([]);
+    setExitMeters(''); setExitClient('');
+    setExitPricePerMeter(''); setExitPriceLocked(false);
+    setExitPriceHint('');
+    setExitDiscount(''); setShowDiscountField(false);
+    setExitNotes('');
+    setSaleResult(null);
   }
 
   function closeExit() {
     setShowExit(false);
-    setExitStep('product'); setExitPrevStep('roll');
-    setExitProductId(''); setExitRoll(null);
-    setExitProductRolls([]);
-    setExitMeters(''); setExitClient(''); setExitPricePerMeter(''); setExitNotes('');
-    setRemnantWarning([]);
+    setExitStep('type-select');
+    setExitRollKind('complete');
+    setWizardRolls([]); setWizardSearch('');
+    setExitRoll(null);
+    setExitMeters(''); setExitClient('');
+    setExitPricePerMeter(''); setExitPriceLocked(false);
+    setExitPriceHint('');
+    setExitDiscount(''); setShowDiscountField(false);
+    setExitNotes('');
+    setSaleResult(null);
   }
 
-  async function handleProductNext() {
-    if (!exitProductId) return;
+  async function handleSelectRollKind(kind: RollKind) {
+    setExitRollKind(kind);
+    setWizardLoading(true);
+    setWizardSearch('');
+    setWizardRolls([]);
     try {
-      const params = new URLSearchParams({ status: 'ACTIVE', productId: exitProductId, limit: '500' });
-      // Also fetch REMNANT rolls
-      const [activeRes, remnantRes] = await Promise.all([
-        fetch(`/api/inventory?${params}`),
-        fetch(`/api/inventory?status=REMNANT&productId=${exitProductId}&limit=500`),
-      ]);
-      const activeJson = await activeRes.json();
-      const remnantJson = await remnantRes.json();
-      const activeRolls: Roll[] = [...(activeJson.data ?? []), ...(remnantJson.data ?? [])];
-      const remnants = activeRolls.filter(r => r.status === 'REMNANT');
-      setExitProductRolls(activeRolls.sort((a, b) => a.currentMeters - b.currentMeters));
-      if (remnants.length > 0) { setRemnantWarning(remnants); setExitStep('remnant-check'); }
-      else { setExitStep('roll'); }
+      const status = kind === 'complete' ? 'ACTIVE' : 'REMNANT';
+      const res = await fetch(`/api/inventory?status=${status}&limit=500`);
+      const json = await res.json();
+      const allRolls: Roll[] = json.data ?? [];
+      const rollsFiltered = kind === 'complete'
+        ? allRolls.filter(r => !r.isRemnant)
+        : allRolls.filter(r => r.isRemnant);
+      if (kind === 'remnant') {
+        rollsFiltered.sort((a, b) => a.currentMeters - b.currentMeters);
+      }
+      setWizardRolls(rollsFiltered);
     } catch {
       setToast({ message: 'Error al cargar rollos', type: 'error' });
+    } finally {
+      setWizardLoading(false);
     }
+    setExitStep('roll-select');
   }
 
   async function handleExit() {
@@ -322,6 +424,8 @@ export default function InventoryClient({
     if (!exitPricePerMeter || isNaN(priceNum) || priceNum <= 0) {
       setToast({ message: 'Ingresa un precio por metro válido', type: 'error' }); return;
     }
+    const discountNum = parseFloat(exitDiscount || '0');
+
     setExitLoading(true);
     try {
       const res = await fetch('/api/inventory/exit', {
@@ -334,23 +438,80 @@ export default function InventoryClient({
           notes: exitNotes || null,
           exitType,
           pricePerMeter: priceNum,
+          discount: discountNum,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setToast({ message: data.error ?? 'Error al registrar salida', type: 'error' }); return; }
+
       const usedMeters = exitType === 'EXIT_FULL' ? exitRoll.currentMeters : parseFloat(exitMeters);
+
       setRolls(prev => prev.map(r =>
         r.id === exitRoll.id
           ? { ...r, currentMeters: data.newMeters, status: data.newStatus, isRemnant: data.isRemnant }
           : r
       ));
-      setToast({ message: `Salida registrada: ${usedMeters}m de ${exitRoll.product.name}`, type: 'success' });
-      closeExit();
+
+      const now = new Date();
+      const colombianNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+      const fecha = colombianNow.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const hora = colombianNow.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+      setSaleResult({
+        movementId: data.movementId,
+        saleId: data.saleId,
+        clientName: data.clientName ?? selectedClient?.name ?? '',
+        clientType: data.clientType ?? selectedClient?.type ?? '',
+        meters: usedMeters,
+        pricePerMeter: priceNum,
+        discount: discountNum,
+        subtotal: data.subtotal ?? usedMeters * priceNum,
+        total: data.total ?? usedMeters * priceNum,
+        roll: exitRoll,
+        registradoPor: userName,
+      });
+      setExitStep('success');
     } catch {
       setToast({ message: 'Error de conexión', type: 'error' });
     } finally {
       setExitLoading(false);
     }
+  }
+
+  function handleDownloadPDF() {
+    if (!saleResult) return;
+    const r = saleResult.roll;
+    const isBlackout = isBlackoutProduct(r.category.name);
+    const ref = formatRef(r.product.code, isBlackout);
+    const color = rollColor(r);
+
+    const now = new Date();
+    const colombianNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+    const fecha = colombianNow.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const hora = colombianNow.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    generateSalePDF({
+      cliente: { nombre: saleResult.clientName, tipo: saleResult.clientType },
+      rollo: {
+        consecutivo: r.disaNumber ?? displayRollNumber(r.rollNumber),
+        referencia: ref,
+        color,
+        ancho: r.product.width,
+        metros: saleResult.meters,
+      },
+      precio: {
+        precioMetro: saleResult.pricePerMeter,
+        descuento: saleResult.discount,
+        subtotal: saleResult.subtotal,
+        total: saleResult.total,
+      },
+      venta: {
+        fecha,
+        hora,
+        movimientoId: saleResult.movementId,
+        registradoPor: saleResult.registradoPor,
+      },
+    });
   }
 
   async function handleEntry(e: React.FormEvent) {
@@ -393,7 +554,6 @@ export default function InventoryClient({
     <div className="p-4 lg:p-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Inventario</h1>
@@ -411,7 +571,6 @@ export default function InventoryClient({
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 mb-5 border-b border-[#E5E5E5]">
         {(['all', 'remnants'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
@@ -426,27 +585,23 @@ export default function InventoryClient({
 
       {/* ── Filter bar — Desktop ── */}
       <div className="hidden md:flex flex-wrap gap-2 mb-3 items-center">
-        {/* 1. Búsqueda libre */}
         <div className="relative flex-1 min-w-48">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
           <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Buscar..."
             className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
         </div>
-        {/* 2. Categoría */}
         <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Todas</option>
           <option value="Velo">Velo</option>
           <option value="Blackout">Blackout</option>
         </select>
-        {/* 3. Color (raw Product.color values) */}
         <select value={colorFilter} onChange={e => setColorFilter(e.target.value)}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Color</option>
           {availableColors.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        {/* 4. Estado */}
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Estado</option>
@@ -506,7 +661,6 @@ export default function InventoryClient({
         </div>
       )}
 
-      {/* Counter */}
       <p className="text-xs text-gray-400 mb-2 flex items-center gap-2">
         {isFetching
           ? <span>Cargando...</span>
@@ -698,135 +852,137 @@ export default function InventoryClient({
         )}
       </div>
 
-      {/* ── EXIT MODAL ── */}
+      {/* ══════════════════════════════════════════════════
+          EXIT MODAL — WIZARD 3 PASOS
+      ══════════════════════════════════════════════════ */}
       {showExit && (
-        <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center sm:p-4" onClick={closeExit}>
+        <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center sm:p-4" onClick={exitStep === 'success' ? undefined : closeExit}>
           <div className="bg-white w-full sm:rounded-xl rounded-t-2xl shadow-2xl sm:max-w-lg max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[#F0F0F0]">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Nueva salida</h2>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {exitStep === 'success' ? 'Venta registrada' : 'Nueva salida'}
+                </h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {exitStep === 'product' && 'Paso 1 de 3 — Selecciona la referencia'}
-                  {exitStep === 'remnant-check' && 'Aviso — Remanentes disponibles'}
-                  {exitStep === 'roll' && 'Paso 2 de 3 — Selecciona el rollo'}
-                  {exitStep === 'confirm' && 'Paso 3 de 3 — Confirmar salida'}
+                  {exitStep === 'type-select' && 'Paso 1 — ¿Qué tipo de rollo?'}
+                  {exitStep === 'roll-select' && (exitRollKind === 'complete' ? 'Paso 2 — Selecciona el rollo completo' : 'Paso 2 — Selecciona el remanente')}
+                  {exitStep === 'confirm' && 'Paso 3 — Detalle de la venta'}
+                  {exitStep === 'success' && '✓ Completado exitosamente'}
                 </p>
               </div>
               <button onClick={closeExit} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
 
             <div className="px-6 py-5">
-              {exitStep === 'product' && (
+
+              {/* ── PASO 1 — Tipo de rollo ── */}
+              {exitStep === 'type-select' && (
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
-                      Referencia <span className="text-red-400">*</span>
-                    </label>
-                    <select value={exitProductId} onChange={e => setExitProductId(e.target.value)} autoFocus
-                      className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400">
-                      <option value="">Seleccionar referencia</option>
-                      {products.map(p => {
-                        const isBlackout = p.categoryId === 2;
-                        const ref = formatRef(p.code, isBlackout);
-                        const pName = productDisplayName(p.name, p.code);
+                  <p className="text-sm text-gray-500">¿Qué tipo de rollo deseas registrar?</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button type="button" onClick={() => handleSelectRollKind('complete')}
+                      className="border-2 border-[#E5E5E5] hover:border-gray-900 rounded-xl p-5 text-left transition-all">
+                      <div className="text-2xl mb-2">📦</div>
+                      <div className="font-semibold text-gray-900 text-sm">Rollo completo</div>
+                      <div className="text-xs text-gray-400 mt-0.5">Sin cortes previos</div>
+                    </button>
+                    <button type="button" onClick={() => handleSelectRollKind('remnant')}
+                      className="border-2 border-[#E5E5E5] hover:border-gray-900 rounded-xl p-5 text-left transition-all">
+                      <div className="text-2xl mb-2">✂️</div>
+                      <div className="font-semibold text-gray-900 text-sm">Remanente / Corte</div>
+                      <div className="text-xs text-gray-400 mt-0.5">Ya tiene cortes anteriores</div>
+                    </button>
+                  </div>
+                  <button type="button" onClick={closeExit}
+                    className="w-full border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">
+                    Cancelar
+                  </button>
+                </div>
+              )}
+
+              {/* ── PASO 2 — Selección de rollo ── */}
+              {exitStep === 'roll-select' && (
+                <div className="space-y-4">
+                  <input type="text" value={wizardSearch} onChange={e => setWizardSearch(e.target.value)}
+                    placeholder="Buscar por consecutivo, referencia..."
+                    className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
+                    autoFocus />
+
+                  {wizardLoading ? (
+                    <div className="py-10 text-center text-gray-400 text-sm">Cargando rollos...</div>
+                  ) : filteredWizardRolls.length === 0 ? (
+                    exitRollKind === 'remnant' && wizardRolls.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <p className="text-gray-500 text-sm mb-3">No hay remanentes disponibles.</p>
+                        <button type="button" onClick={() => handleSelectRollKind('complete')}
+                          className="text-blue-600 text-sm hover:text-blue-800 underline">
+                          ¿Registrar salida de rollo completo?
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-gray-400 text-sm">Sin resultados para esa búsqueda</div>
+                    )
+                  ) : (
+                    <div className="max-h-72 overflow-y-auto space-y-1.5">
+                      {/* Header de columnas */}
+                      <div className="grid grid-cols-12 gap-2 px-3 py-1.5 text-[10px] text-gray-400 uppercase tracking-wide font-medium border-b border-[#F0F0F0]">
+                        <span className="col-span-2">Consec.</span>
+                        <span className="col-span-3">Referencia</span>
+                        <span className="col-span-2">Color</span>
+                        <span className="col-span-2 text-right">Ancho</span>
+                        <span className="col-span-3 text-right">
+                          {exitRollKind === 'remnant' ? 'Disp. / Inicial' : 'Metros'}
+                        </span>
+                      </div>
+                      {filteredWizardRolls.map(r => {
+                        const isBlackout = isBlackoutProduct(r.category.name);
+                        const ref = formatRef(r.product.code, isBlackout);
+                        const color = rollColor(r);
                         return (
-                          <option key={p.id} value={p.id}>
-                            {ref} — {pName}
-                          </option>
+                          <button key={r.id} type="button"
+                            onClick={() => { setExitRoll(r); setExitStep('confirm'); }}
+                            className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${exitRoll?.id === r.id ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
+                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{r.disaNumber ?? '—'}</span>
+                            <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
+                            <span className="col-span-2 text-gray-500 truncate">{color}</span>
+                            <span className="col-span-2 text-right text-gray-500">{r.product.width} cm</span>
+                            <span className="col-span-3 text-right">
+                              {exitRollKind === 'remnant' ? (
+                                <span>
+                                  <span className="font-semibold text-amber-600">{r.currentMeters}m</span>
+                                  <span className="text-gray-300"> / {r.initialMeters}m</span>
+                                </span>
+                              ) : (
+                                <span className="font-semibold text-green-700">{r.currentMeters}m</span>
+                              )}
+                            </span>
+                          </button>
                         );
                       })}
-                    </select>
-                  </div>
-                  <div className="flex gap-3 pt-1">
-                    <button type="button" onClick={closeExit} className="flex-1 border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
-                    <button type="button" onClick={handleProductNext} disabled={!exitProductId} className="flex-1 bg-[#0A0A0A] text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-40">Siguiente →</button>
-                  </div>
-                </div>
-              )}
-
-              {exitStep === 'remnant-check' && (
-                <div className="space-y-4">
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                    <p className="text-amber-800 text-sm font-semibold mb-2">⚠ {remnantWarning.length} remanente{remnantWarning.length > 1 ? 's' : ''} disponibles</p>
-                    <p className="text-amber-700 text-xs mb-3">Se recomienda agotar los remanentes antes de cortar rollos completos.</p>
-                    <div className="space-y-1">
-                      {remnantWarning.map(r => (
-                        <div key={r.id} className="flex items-center justify-between bg-white border border-amber-200 rounded px-3 py-2 text-xs">
-                          <span className="font-mono text-gray-600">{r.disaNumber ?? displayRollNumber(r.rollNumber)}</span>
-                          <span className="font-semibold text-amber-700">{r.currentMeters} m</span>
-                          <span className="text-gray-400">{r.location}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setExitStep('product')} className="flex-1 border border-[#E5E5E5] rounded px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-50">← Volver</button>
-                    <button type="button" onClick={() => { setExitRoll(remnantWarning[0]); setExitPrevStep('remnant-check'); setExitStep('confirm'); }}
-                      className="flex-1 bg-amber-500 text-white rounded px-3 py-2.5 text-sm font-medium hover:bg-amber-600">Usar remanente</button>
-                    <button type="button" onClick={() => setExitStep('roll')} className="flex-1 bg-[#0A0A0A] text-white rounded px-3 py-2.5 text-sm font-medium hover:bg-[#1A1A1A]">Continuar igual</button>
-                  </div>
-                </div>
-              )}
-
-              {exitStep === 'roll' && (
-                <div className="space-y-4">
-                  <p className="text-sm text-gray-500">{exitProductRolls.length} rollo{exitProductRolls.length !== 1 ? 's' : ''} disponibles</p>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {exitProductRolls.map(r => (
-                      <button key={r.id} type="button"
-                        onClick={() => { setExitRoll(r); setExitPrevStep('roll'); setExitStep('confirm'); }}
-                        className={`w-full flex items-center justify-between border rounded-lg px-4 py-3 text-sm hover:border-gray-400 transition-colors min-h-[44px] ${exitRoll?.id === r.id ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
-                        <div className="text-left">
-                          <div className="font-semibold text-gray-800 text-sm">{r.disaNumber ?? '—'}</div>
-                          <div className="text-xs text-gray-400">Rollo {displayRollNumber(r.rollNumber)} · {r.location}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className={`font-semibold ${r.status === 'REMNANT' ? 'text-amber-600' : 'text-green-700'}`}>{r.currentMeters} m</div>
-                          {r.status === 'REMNANT' && <div className="text-xs text-amber-500">Remanente</div>}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  <button type="button" onClick={() => setExitStep('product')} className="w-full border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">← Volver</button>
-                </div>
-              )}
-
-              {exitStep === 'confirm' && exitRoll && (
-                <div className="space-y-4">
-                  <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
-                    <div><span className="text-gray-400 block text-xs">Consecutivo</span><span className="font-bold">{exitRoll.disaNumber ?? '—'}</span></div>
-                    <div><span className="text-gray-400 block text-xs">Ref.</span><span className="font-mono font-semibold text-xs">{formatRef(exitRoll.product.code, isBlackoutProduct(exitRoll.category.name))}</span></div>
-                    <div><span className="text-gray-400 block text-xs">Producto</span><span className="font-medium text-sm">{productDisplayName(exitRoll.product.name, exitRoll.product.code)}</span></div>
-                    <div><span className="text-gray-400 block text-xs">Color</span><span>{rollColor(exitRoll)}</span></div>
-                    <div><span className="text-gray-400 block text-xs">No. Rollo</span><span className="font-mono text-xs">{displayRollNumber(exitRoll.rollNumber)}</span></div>
-                    <div><span className="text-gray-400 block text-xs">Disponibles</span><span className={`font-semibold ${exitRoll.status === 'REMNANT' ? 'text-amber-600' : 'text-green-700'}`}>{exitRoll.currentMeters} m</span></div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Tipo de salida</label>
-                    <div className="flex gap-2">
-                      {(['EXIT_PARTIAL', 'EXIT_FULL'] as const).map(t => (
-                        <button key={t} type="button" onClick={() => setExitType(t)}
-                          className={`flex-1 border rounded-lg px-3 py-3 text-sm text-left transition-colors min-h-[44px] ${exitType === t ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5] hover:border-gray-400'}`}>
-                          <div className="font-semibold text-gray-900 text-xs mb-0.5">{t === 'EXIT_PARTIAL' ? 'Salida parcial' : 'Salida total'}</div>
-                          <div className="text-xs text-gray-400">{t === 'EXIT_PARTIAL' ? 'Corte por metros' : `Completo (${exitRoll.currentMeters}m)`}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {exitType === 'EXIT_PARTIAL' && (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
-                        Metros a cortar <span className="text-red-400">*</span>
-                      </label>
-                      <input type="number" step="0.1" min="0.1" max={exitRoll.currentMeters} value={exitMeters}
-                        onChange={e => setExitMeters(e.target.value)} autoFocus
-                        className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
-                        placeholder={`Máx. ${exitRoll.currentMeters} m`} />
                     </div>
                   )}
 
+                  <button type="button" onClick={() => setExitStep('type-select')}
+                    className="w-full border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">
+                    ← Volver
+                  </button>
+                </div>
+              )}
+
+              {/* ── PASO 3 — Detalle de la venta ── */}
+              {exitStep === 'confirm' && exitRoll && (
+                <div className="space-y-4">
+                  {/* Rollo seleccionado (readonly) */}
+                  <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
+                    <div><span className="text-gray-400 block text-xs">Consecutivo</span><span className="font-bold font-mono">{exitRoll.disaNumber ?? '—'}</span></div>
+                    <div><span className="text-gray-400 block text-xs">Ref.</span><span className="font-mono font-semibold text-xs">{formatRef(exitRoll.product.code, isBlackoutProduct(exitRoll.category.name))}</span></div>
+                    <div><span className="text-gray-400 block text-xs">Producto</span><span className="font-medium text-sm">{productDisplayName(exitRoll.product.name, exitRoll.product.code)}</span></div>
+                    <div><span className="text-gray-400 block text-xs">Color</span><span>{rollColor(exitRoll)}</span></div>
+                    <div><span className="text-gray-400 block text-xs">Ancho</span><span>{exitRoll.product.width} cm</span></div>
+                    <div><span className="text-gray-400 block text-xs">Disponibles</span><span className={`font-semibold ${exitRoll.status === 'REMNANT' ? 'text-amber-600' : 'text-green-700'}`}>{exitRoll.currentMeters} m</span></div>
+                  </div>
+
+                  {/* Cliente */}
                   <div>
                     <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
                       Cliente <span className="text-red-400">*</span>
@@ -834,35 +990,122 @@ export default function InventoryClient({
                     <ClientCombobox
                       clients={clientsList}
                       value={exitClient}
-                      onChange={setExitClient}
+                      onChange={v => { setExitClient(v); setExitDiscount(''); setShowDiscountField(false); }}
                       onClientCreated={newC => setClientsList(prev => [...prev, newC].sort((a, b) => a.name.localeCompare(b.name)))}
                       placeholder="Seleccionar o crear cliente..."
+                      productRef={baseRef(exitRoll.product.code)}
                     />
                   </div>
 
-                  {/* Precio por metro — Cambio 4 */}
+                  {/* Tipo de salida — oculto si sellsByRoll */}
+                  {!selectedClient?.sellsByRoll && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Metros a vender</label>
+                      <div className="flex gap-2">
+                        {(['EXIT_PARTIAL', 'EXIT_FULL'] as const).map(t => (
+                          <button key={t} type="button" onClick={() => setExitType(t)}
+                            className={`flex-1 border rounded-lg px-3 py-3 text-sm text-left transition-colors min-h-[44px] ${exitType === t ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5] hover:border-gray-400'}`}>
+                            <div className="font-semibold text-gray-900 text-xs mb-0.5">{t === 'EXIT_PARTIAL' ? 'Corte parcial' : 'Rollo completo'}</div>
+                            <div className="text-xs text-gray-400">{t === 'EXIT_PARTIAL' ? 'Ingresa los metros' : `${exitRoll.currentMeters} m disponibles`}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Metros */}
+                  {selectedClient?.sellsByRoll ? (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+                      Venta por rollo completo · <span className="font-bold">{exitRoll.currentMeters} m</span>
+                    </div>
+                  ) : exitType === 'EXIT_PARTIAL' ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
+                        Metros a cortar <span className="text-red-400">*</span>
+                      </label>
+                      <input type="number" step="0.1" min="0.1" max={exitRoll.currentMeters} value={exitMeters}
+                        onChange={e => setExitMeters(e.target.value)}
+                        className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
+                        placeholder={`Máx. ${exitRoll.currentMeters} m`} />
+                    </div>
+                  ) : null}
+
+                  {/* Precio por metro */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
-                      Precio por metro <span className="text-red-400">*</span>
-                    </label>
-                    <input type="number" step="100" min="1" value={exitPricePerMeter}
-                      onChange={e => setExitPricePerMeter(e.target.value)}
-                      className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
-                      placeholder="Ej. 25000" />
-                    {exitPricePerMeter && parseFloat(exitPricePerMeter) > 0 && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Total estimado:&nbsp;
-                        <span className="font-semibold text-gray-800">
-                          {formatCOP(
-                            parseFloat(exitPricePerMeter) *
-                            (exitType === 'EXIT_FULL'
-                              ? exitRoll.currentMeters
-                              : (parseFloat(exitMeters) || 0))
-                          )}
-                        </span>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">
+                        Precio por metro <span className="text-red-400">*</span>
+                      </label>
+                      {exitPriceLocked && canManage && (
+                        <button type="button"
+                          onClick={() => { setShowDiscountField(v => !v); if (showDiscountField) setExitDiscount(''); }}
+                          className="text-xs text-blue-600 hover:text-blue-800 underline">
+                          {showDiscountField ? 'Quitar descuento' : 'Aplicar descuento'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input type="number" step="100" min="1" value={exitPricePerMeter}
+                        onChange={e => { if (!exitPriceLocked) setExitPricePerMeter(e.target.value); }}
+                        readOnly={exitPriceLocked}
+                        className={`w-full border rounded px-3 py-2.5 text-sm focus:outline-none ${exitPriceLocked ? 'border-gray-200 bg-gray-50 text-gray-700' : 'border-[#E5E5E5] focus:border-gray-400'}`}
+                        placeholder="Ej. 25000" />
+                      {exitPriceLocked && (
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">🔒</span>
+                      )}
+                      {fetchingPrice && (
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">...</span>
+                      )}
+                    </div>
+                    {exitPriceHint && !fetchingPrice && (
+                      <p className={`text-xs mt-1 ${exitPriceHint.startsWith('Sin') ? 'text-amber-600' : 'text-blue-600'}`}>
+                        {exitPriceHint}
                       </p>
                     )}
                   </div>
+
+                  {/* Descuento — solo OWNER/ADMIN cuando se activa */}
+                  {showDiscountField && canManage && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
+                        Descuento (%)
+                      </label>
+                      <input type="number" step="0.5" min="0" max="100" value={exitDiscount}
+                        onChange={e => setExitDiscount(e.target.value)}
+                        className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
+                        placeholder="Ej. 5" autoFocus />
+                    </div>
+                  )}
+
+                  {/* Resumen en tiempo real */}
+                  {exitPricePerMeter && exitCalc.price > 0 && exitCalc.meters > 0 && (
+                    <div className="bg-gray-50 border border-[#E5E5E5] rounded-lg px-4 py-3 text-sm space-y-1.5">
+                      <div className="flex justify-between text-gray-500">
+                        <span>Precio/m</span>
+                        <span className="tabular-nums">{formatCOP(exitCalc.price)}</span>
+                      </div>
+                      <div className="flex justify-between text-gray-500">
+                        <span>Metros</span>
+                        <span className="tabular-nums">{exitCalc.meters} m</span>
+                      </div>
+                      {exitCalc.disc > 0 && (
+                        <>
+                          <div className="flex justify-between text-gray-500">
+                            <span>Subtotal</span>
+                            <span className="tabular-nums">{formatCOP(exitCalc.subtotal)}</span>
+                          </div>
+                          <div className="flex justify-between text-red-500">
+                            <span>Descuento ({exitCalc.disc}%)</span>
+                            <span className="tabular-nums">–{formatCOP(exitCalc.discountAmount)}</span>
+                          </div>
+                        </>
+                      )}
+                      <div className="border-t border-[#E5E5E5] pt-2 flex justify-between font-bold text-gray-900 text-base">
+                        <span>TOTAL</span>
+                        <span className="tabular-nums">{formatCOP(exitCalc.total)}</span>
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">Notas</label>
@@ -872,11 +1115,81 @@ export default function InventoryClient({
                   </div>
 
                   <div className="flex gap-3 pt-1">
-                    <button type="button" onClick={() => setExitStep(exitPrevStep)} className="border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">← Volver</button>
+                    <button type="button"
+                      onClick={() => wizardRolls.length > 0 ? setExitStep('roll-select') : setExitStep('type-select')}
+                      className="border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">
+                      ← Volver
+                    </button>
                     <button type="button" onClick={handleExit}
-                      disabled={exitLoading || !exitClient || !exitPricePerMeter || (exitType === 'EXIT_PARTIAL' && !exitMeters)}
-                      className="flex-1 bg-[#0A0A0A] text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-50">
-                      {exitLoading ? 'Registrando...' : 'Confirmar salida'}
+                      disabled={exitLoading || !exitClient || !exitPricePerMeter || (exitType === 'EXIT_PARTIAL' && !exitMeters && !selectedClient?.sellsByRoll)}
+                      className="flex-1 bg-green-600 text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors">
+                      {exitLoading ? 'Registrando...' : 'Confirmar venta'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── PASO 4 — Éxito ── */}
+              {exitStep === 'success' && saleResult && (
+                <div className="space-y-5">
+                  <div className="text-center py-2">
+                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <span className="text-2xl">✓</span>
+                    </div>
+                    <p className="text-base font-semibold text-gray-900">Venta registrada</p>
+                    <p className="text-sm text-gray-400 mt-1">Mov. #{saleResult.movementId}</p>
+                  </div>
+
+                  <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Cliente</span>
+                      <span className="font-medium text-gray-900">{saleResult.clientName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Producto</span>
+                      <span className="font-medium text-gray-900 font-mono text-xs">{formatRef(saleResult.roll.product.code, isBlackoutProduct(saleResult.roll.category.name))}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Consecutivo</span>
+                      <span className="font-medium text-gray-900">{saleResult.roll.disaNumber ?? '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Metros</span>
+                      <span className="font-medium text-gray-900">{saleResult.meters} m</span>
+                    </div>
+                    {saleResult.discount > 0 && (
+                      <div className="flex justify-between text-gray-500">
+                        <span>Descuento</span>
+                        <span>{saleResult.discount}%</span>
+                      </div>
+                    )}
+                    <div className="border-t border-[#E5E5E5] pt-2 flex justify-between font-bold text-gray-900 text-base">
+                      <span>TOTAL</span>
+                      <span className="tabular-nums">{formatCOP(saleResult.total)}</span>
+                    </div>
+                  </div>
+
+                  <button type="button" onClick={handleDownloadPDF}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-3 text-sm font-medium hover:bg-blue-700 transition-colors">
+                    📄 Descargar tirilla
+                  </button>
+
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => {
+                      setSaleResult(null);
+                      setExitStep('type-select');
+                      setExitRoll(null); setExitClient('');
+                      setExitMeters(''); setExitPricePerMeter('');
+                      setExitPriceLocked(false); setExitPriceHint(''); setExitDiscount('');
+                      setShowDiscountField(false); setExitNotes('');
+                      setWizardRolls([]); setWizardSearch('');
+                    }}
+                      className="flex-1 border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">
+                      Otra salida
+                    </button>
+                    <button type="button" onClick={closeExit}
+                      className="flex-1 bg-[#0A0A0A] text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-[#1A1A1A]">
+                      Cerrar
                     </button>
                   </div>
                 </div>
