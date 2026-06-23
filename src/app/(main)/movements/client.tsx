@@ -29,10 +29,11 @@ const TYPE_CLASS: Record<string, string> = {
   RETURN: 'bg-green-100 text-green-700',
 };
 
-// DISTRIBUTOR = Fijo, DECORATOR = Ocasional
 const CLIENT_TYPE_LABEL: Record<string, string> = {
   DISTRIBUTOR: 'Fijo',
   DECORATOR: 'Ocasional',
+  FIXED: 'Fijo',
+  OCCASIONAL: 'Ocasional',
 };
 
 function formatCOP(n: number) {

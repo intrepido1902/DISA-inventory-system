@@ -8,16 +8,17 @@ export async function GET() {
   if (!session) return Response.json({ error: 'No autorizado' }, { status: 401 });
 
   try {
-    const { data, error } = await db
+    const dbAny = db as any;
+    const { data, error } = await dbAny
       .from('Client')
-      .select('id, name, type, phone, email, notes, active, createdAt, pricePerMeter')
+      .select('*, ClientPrice(*)')
       .eq('active', 1)
       .order('name', { ascending: true });
     if (error) throw error;
     return Response.json(data ?? []);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/clients error:', err);
-    return Response.json({ error: 'Error al obtener clientes' }, { status: 500 });
+    return Response.json({ error: err?.message ?? 'Error al obtener clientes' }, { status: 500 });
   }
 }
 
@@ -30,27 +31,22 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { name, type, phone, email, notes, pricePerMeter } = body as {
+    const { name, type, phone, email, notes, sellsByRoll } = body as {
       name?: string;
       type?: string;
       phone?: string | null;
       email?: string | null;
       notes?: string | null;
-      pricePerMeter?: number | null;
+      sellsByRoll?: boolean;
     };
 
     if (!name?.trim()) {
       return Response.json({ error: 'El nombre del cliente es requerido' }, { status: 400 });
     }
 
-    // DISTRIBUTOR = Fijo (has fixed pricePerMeter), DECORATOR = Ocasional
-    const validTypes = ['DISTRIBUTOR', 'DECORATOR'];
-    const clientType = validTypes.includes(type ?? '') ? type! : 'DISTRIBUTOR';
-
-    // pricePerMeter required for DISTRIBUTOR clients
-    const priceValue = clientType === 'DISTRIBUTOR' && pricePerMeter && pricePerMeter > 0
-      ? pricePerMeter
-      : null;
+    const validTypes = ['DISTRIBUTOR', 'DECORATOR', 'FIXED', 'OCCASIONAL'];
+    const clientType = validTypes.includes(type ?? '') ? type! : 'OCCASIONAL';
+    const isFixed = clientType === 'DISTRIBUTOR' || clientType === 'FIXED';
 
     const now = Date.now();
     const dbAny = db as any;
@@ -63,16 +59,16 @@ export async function POST(request: NextRequest) {
         phone: phone?.trim() || null,
         email: email?.trim() || null,
         notes: notes?.trim() || null,
-        pricePerMeter: priceValue,
+        sellsByRoll: isFixed ? Boolean(sellsByRoll) : false,
         active: 1,
         createdAt: now,
       })
-      .select('id, name, type, phone, email, notes, active, createdAt, pricePerMeter')
+      .select('id, name, type, phone, email, notes, active, createdAt, sellsByRoll')
       .single();
 
     if (error) {
       console.error('POST /api/clients insert error:', error);
-      return Response.json({ error: 'Error al crear cliente' }, { status: 500 });
+      return Response.json({ error: error.message ?? 'Error al crear cliente' }, { status: 500 });
     }
 
     await dbAny.from('AuditLog').insert({
@@ -81,13 +77,13 @@ export async function POST(request: NextRequest) {
       entity: 'Client',
       entityId: data.id,
       oldData: null,
-      newData: JSON.stringify({ name: name.trim(), type: clientType, pricePerMeter: priceValue }),
+      newData: JSON.stringify({ name: name.trim(), type: clientType }),
       createdAt: now,
     });
 
     return Response.json(data, { status: 201 });
-  } catch (err) {
+  } catch (err: any) {
     console.error('POST /api/clients error:', err);
-    return Response.json({ error: 'Error al crear cliente' }, { status: 500 });
+    return Response.json({ error: err?.message ?? 'Error al crear cliente' }, { status: 500 });
   }
 }
