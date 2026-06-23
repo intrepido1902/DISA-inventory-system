@@ -154,7 +154,7 @@ export default async function DashboardPage() {
     <div className="p-4 lg:p-6 max-w-6xl mx-auto">
       <div className="mb-6 lg:mb-8">
         <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">
-          Bienvenida, {session!.name.split(' ')[0]}
+          Hola, {session!.name.split(' ')[0]}
         </h1>
         <p className="text-gray-500 text-sm mt-1 capitalize">{today}</p>
       </div>
