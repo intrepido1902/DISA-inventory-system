@@ -3,6 +3,7 @@ import { canSeeFinancials, type Role } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { formatColombianDate } from '@/lib/dateUtils';
 import LowStockPanel from './LowStockPanel';
+import RejectedDefectsPanel from './RejectedDefectsPanel';
 
 function formatCOP(n: number) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
@@ -158,6 +159,9 @@ export default async function DashboardPage() {
         </h1>
         <p className="text-gray-500 text-sm mt-1 capitalize">{today}</p>
       </div>
+
+      {/* Rejection notification — for ADMIN/WAREHOUSE reporters (Client Component) */}
+      {session!.role !== 'OWNER' && <RejectedDefectsPanel />}
 
       {/* Low stock alert — expandable (Client Component) */}
       {data.lowStockProducts.length > 0 && (

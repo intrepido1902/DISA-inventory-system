@@ -3,7 +3,7 @@ import { getSession } from '@/lib/session';
 import { db } from '@/lib/db';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ movementId: string }> },
 ) {
   const session = await getSession();
@@ -13,6 +13,14 @@ export async function POST(
   const { movementId } = await params;
   const movIdNum = Number(movementId);
   if (isNaN(movIdNum)) return Response.json({ error: 'ID inválido' }, { status: 400 });
+
+  let rejectionComment: string | null = null;
+  try {
+    const body = await req.json();
+    rejectionComment = typeof body?.rejectionComment === 'string' && body.rejectionComment.trim()
+      ? body.rejectionComment.trim()
+      : null;
+  } catch { /* body is optional */ }
 
   try {
     const dbAny = db as any;
@@ -34,6 +42,7 @@ export async function POST(
       approvalStatus: 'REJECTED',
       approvedBy: session.userId,
       approvedAt: now,
+      rejectionComment,
     }).eq('id', movIdNum);
 
     await dbAny.from('AuditLog').insert({

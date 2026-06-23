@@ -46,6 +46,8 @@ export default function PendingDefectsPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectComment, setRejectComment] = useState('');
 
   useEffect(() => {
     fetch('/api/movements/pending')
@@ -55,14 +57,36 @@ export default function PendingDefectsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleAction(movementId: number, action: 'approve' | 'reject') {
+  async function handleApprove(movementId: number) {
     setActing(movementId);
     setError('');
     try {
-      const res = await fetch(`/api/movements/${movementId}/${action}`, { method: 'POST' });
+      const res = await fetch(`/api/movements/${movementId}/approve`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) { setError(data.error ?? 'Error al procesar'); return; }
+      if (!res.ok) { setError(data.error ?? 'Error al aprobar'); return; }
       setItems(prev => prev.filter(m => m.id !== movementId));
+    } catch {
+      setError('Error de conexión');
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function handleRejectConfirm() {
+    if (rejectingId === null) return;
+    setActing(rejectingId);
+    setError('');
+    try {
+      const res = await fetch(`/api/movements/${rejectingId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rejectionComment: rejectComment.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? 'Error al rechazar'); return; }
+      setItems(prev => prev.filter(m => m.id !== rejectingId));
+      setRejectingId(null);
+      setRejectComment('');
     } catch {
       setError('Error de conexión');
     } finally {
@@ -76,6 +100,40 @@ export default function PendingDefectsPage() {
         <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Bajas pendientes</h1>
         <p className="text-sm text-gray-500 mt-0.5">Defectos y bajas reportados que requieren tu aprobación</p>
       </div>
+
+      {/* Reject confirmation modal */}
+      {rejectingId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Rechazar baja</h2>
+            <p className="text-sm text-gray-500 mb-4">Opcional: explica al reportante el motivo del rechazo.</p>
+            <textarea
+              className="w-full border border-[#E5E5E5] rounded-lg px-3 py-2 text-sm text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-red-400"
+              rows={3}
+              placeholder="Motivo del rechazo (opcional)"
+              value={rejectComment}
+              onChange={e => setRejectComment(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => { setRejectingId(null); setRejectComment(''); }}
+                disabled={acting !== null}
+                className="flex-1 border border-[#E5E5E5] text-gray-700 hover:bg-gray-50 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleRejectConfirm}
+                disabled={acting !== null}
+                className="flex-1 bg-red-600 text-white hover:bg-red-700 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-40"
+              >
+                {acting !== null ? '...' : 'Confirmar rechazo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
@@ -137,14 +195,14 @@ export default function PendingDefectsPage() {
 
                 <div className="flex gap-2 flex-shrink-0">
                   <button
-                    onClick={() => handleAction(m.id, 'reject')}
+                    onClick={() => { setRejectingId(m.id); setRejectComment(''); }}
                     disabled={acting === m.id}
                     className="border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 rounded px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40"
                   >
-                    {acting === m.id ? '...' : '❌ Rechazar'}
+                    ❌ Rechazar
                   </button>
                   <button
-                    onClick={() => handleAction(m.id, 'approve')}
+                    onClick={() => handleApprove(m.id)}
                     disabled={acting === m.id}
                     className="bg-green-600 text-white hover:bg-green-700 rounded px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40"
                   >
