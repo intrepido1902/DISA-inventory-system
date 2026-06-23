@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getBlackoutColorName, isBlackoutProduct } from '@/lib/colorMap';
 import { formatColombianDate } from '@/lib/dateUtils';
 import ReimprimirButton from './ReimprimirButton';
+import RollLabelButton from './RollLabelButton';
 
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'Activo',
@@ -157,7 +158,19 @@ export default async function RollTracePage({
 
       {/* Roll info card */}
       <div className="bg-white border border-[#E5E5E5] rounded-lg p-5 mb-6">
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Ficha del rollo</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ficha del rollo</h2>
+          <RollLabelButton data={{
+            consecutivo: r.disaNumber ?? `ID ${rollIdNum}`,
+            referencia: refDisplay || '—',
+            color: displayColor,
+            anchoStr: r.product?.width ? `${r.product.width} cm` : '—',
+            metrosActuales: r.currentMeters as number,
+            metrosIniciales: r.initialMeters as number,
+            estado: STATUS_LABEL[r.status] ?? r.status,
+            actualizadoEn: new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' }),
+          }} />
+        </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
           {[
             { label: 'Consecutivo', value: r.disaNumber ?? '—' },

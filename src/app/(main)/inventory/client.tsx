@@ -6,6 +6,7 @@ import Link from 'next/link';
 import ClientCombobox, { type ComboClient } from '@/components/ClientCombobox';
 import { getBlackoutColorName, isBlackoutProduct } from '@/lib/colorMap';
 import { generateSalePDF } from '@/lib/generateSalePDF';
+import { generateRollLabel } from '@/lib/generateRollLabel';
 import { formatColombianDate } from '@/lib/dateUtils';
 
 interface Roll {
@@ -106,6 +107,9 @@ interface SaleResultRoll {
   meters: number;
   pricePerMeter: number;
   subtotal: number;
+  exitType: 'EXIT_FULL' | 'EXIT_PARTIAL';
+  newMeters: number;
+  newStatus: string;
 }
 
 interface SaleResult {
@@ -503,7 +507,16 @@ export default function InventoryClient({
 
       const saleRolls: SaleResultRoll[] = selectedRolls.map((roll, i) => {
         const p = rollsPayload[i];
-        return { roll, meters: p.meters, pricePerMeter: p.pricePerMeter, subtotal: p.meters * p.pricePerMeter };
+        const ru = (data.rollUpdates ?? []).find((r: any) => r.rollId === roll.id);
+        return {
+          roll,
+          meters: p.meters,
+          pricePerMeter: p.pricePerMeter,
+          subtotal: p.meters * p.pricePerMeter,
+          exitType: p.exitType as 'EXIT_FULL' | 'EXIT_PARTIAL',
+          newMeters: ru?.newMeters ?? 0,
+          newStatus: ru?.newStatus ?? (p.exitType === 'EXIT_FULL' ? 'DEPLETED' : 'REMNANT'),
+        };
       });
 
       setSaleResult({
@@ -547,6 +560,25 @@ export default function InventoryClient({
       }),
       precio: { descuento: saleResult.discount, subtotalGeneral: saleResult.subtotal, total: saleResult.total },
       venta: { fecha, hora, documentId: saleResult.saleId, registradoPor: saleResult.registradoPor },
+    });
+  }
+
+  function handleDownloadLabel(item: SaleResultRoll) {
+    const isBlackout = isBlackoutProduct(item.roll.category.name);
+    const today = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const STATUS_LBL: Record<string, string> = {
+      ACTIVE: 'Activo', REMNANT: 'Remanente', DEPLETED: 'Agotado',
+      DEFECTIVE: 'Defectuoso', WRITTEN_OFF: 'Dado de baja',
+    };
+    generateRollLabel({
+      consecutivo: item.roll.disaNumber ?? displayRollNumber(item.roll.rollNumber),
+      referencia: formatRef(item.roll.product.code, isBlackout),
+      color: rollColor(item.roll),
+      anchoStr: `${item.roll.product.width} cm`,
+      metrosActuales: item.newMeters,
+      metrosIniciales: item.roll.initialMeters,
+      estado: STATUS_LBL[item.newStatus] ?? item.newStatus,
+      actualizadoEn: today,
     });
   }
 
@@ -788,6 +820,17 @@ export default function InventoryClient({
                               Salida
                             </button>
                           )}
+                          <button
+                            title="Descargar etiqueta"
+                            onClick={() => {
+                              const isBlackout = isBlackoutProduct(roll.category.name);
+                              const today = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' });
+                              const S: Record<string, string> = { ACTIVE: 'Activo', REMNANT: 'Remanente', DEPLETED: 'Agotado', DEFECTIVE: 'Defectuoso', WRITTEN_OFF: 'Dado de baja' };
+                              generateRollLabel({ consecutivo: roll.disaNumber ?? displayRollNumber(roll.rollNumber), referencia: formatRef(roll.product.code, isBlackout), color: rollColor(roll), anchoStr: `${roll.product.width} cm`, metrosActuales: roll.currentMeters, metrosIniciales: roll.initialMeters, estado: S[roll.status] ?? roll.status, actualizadoEn: today });
+                            }}
+                            className="text-base text-amber-600 hover:text-amber-800 border border-amber-200 w-8 h-8 flex items-center justify-center rounded hover:bg-amber-50 transition-colors">
+                            🏷️
+                          </button>
                           <Link href={`/inventory/${roll.id}`} title="Ver trazabilidad"
                             className="text-base text-gray-400 hover:text-gray-700 border border-[#E5E5E5] w-8 h-8 flex items-center justify-center rounded hover:bg-gray-50 transition-colors">
                             🔍
@@ -866,6 +909,16 @@ export default function InventoryClient({
                       ↑ Salida
                     </button>
                   )}
+                  <button
+                    onClick={() => {
+                      const isBlackout = isBlackoutProduct(roll.category.name);
+                      const today = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' });
+                      const S: Record<string, string> = { ACTIVE: 'Activo', REMNANT: 'Remanente', DEPLETED: 'Agotado', DEFECTIVE: 'Defectuoso', WRITTEN_OFF: 'Dado de baja' };
+                      generateRollLabel({ consecutivo: roll.disaNumber ?? displayRollNumber(roll.rollNumber), referencia: formatRef(roll.product.code, isBlackout), color: rollColor(roll), anchoStr: `${roll.product.width} cm`, metrosActuales: roll.currentMeters, metrosIniciales: roll.initialMeters, estado: S[roll.status] ?? roll.status, actualizadoEn: today });
+                    }}
+                    className="text-sm border border-amber-200 text-amber-700 py-2.5 px-3 rounded hover:bg-amber-50 transition-colors flex items-center justify-center">
+                    🏷️
+                  </button>
                   <Link href={`/inventory/${roll.id}`}
                     className={`${(roll.status === 'ACTIVE' || roll.status === 'REMNANT') ? '' : 'flex-1'} text-sm border border-[#E5E5E5] text-gray-600 py-2.5 px-3 rounded hover:bg-gray-50 transition-colors flex items-center justify-center gap-1`}>
                     🔍 <span>Trazabilidad</span>
@@ -1263,6 +1316,13 @@ export default function InventoryClient({
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-3 text-sm font-medium hover:bg-blue-700 transition-colors">
                     📄 Descargar tirilla
                   </button>
+
+                  {saleResult.rolls.filter(item => item.exitType === 'EXIT_PARTIAL').map(item => (
+                    <button key={item.roll.id} type="button" onClick={() => handleDownloadLabel(item)}
+                      className="w-full flex items-center justify-center gap-2 border border-amber-300 bg-amber-50 text-amber-800 rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-amber-100 transition-colors">
+                      🏷️ Etiqueta actualizada — {item.roll.disaNumber ?? displayRollNumber(item.roll.rollNumber)} ({item.newMeters} m)
+                    </button>
+                  ))}
 
                   <div className="flex gap-3">
                     <button type="button" onClick={() => {
