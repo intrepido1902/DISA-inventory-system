@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { formatColombianDate } from '@/lib/dateUtils';
+import { ACTION_LABELS, ACTION_COLORS, formatAuditData } from '@/lib/auditLabels';
 
 interface AuditLog {
   id: number; action: string; entity: string; entityId: number;
@@ -10,71 +11,50 @@ interface AuditLog {
 }
 interface User { id: number; name: string }
 
-const ACTION_LABEL: Record<string, string> = {
-  ENTRY: 'Entrada',
-  EXIT_FULL: 'Salida total',
-  EXIT_PARTIAL: 'Salida parcial',
-  ADJUSTMENT: 'Ajuste',
-  WRITE_OFF: 'Baja',
-  RETURN: 'Devolución',
-  REVERT_SALE: 'Reversión',
-  CREATE_CLIENT: 'Crear cliente',
-};
-const ACTION_CLASS: Record<string, string> = {
-  ENTRY: 'bg-green-100 text-green-700',
-  EXIT_FULL: 'bg-red-100 text-red-700',
-  EXIT_PARTIAL: 'bg-orange-100 text-orange-700',
-  ADJUSTMENT: 'bg-blue-100 text-blue-700',
-  WRITE_OFF: 'bg-gray-100 text-gray-600',
-  RETURN: 'bg-green-100 text-green-700',
-  REVERT_SALE: 'bg-purple-100 text-purple-700',
-  CREATE_CLIENT: 'bg-blue-100 text-blue-700',
-};
-
-// Cambio 7: human-readable field labels
-const FIELD_LABELS: Record<string, string> = {
-  currentMeters: 'Metros actuales',
-  initialMeters: 'Metros iniciales',
-  status: 'Estado',
-  isRemnant: 'Es remanente',
-  location: 'Ubicación',
-  pricePerMeter: 'Precio/m',
-  priceB2B: 'Precio B2B',
-  name: 'Nombre',
-  type: 'Tipo',
-  rollNumber: 'No. Rollo',
-  disaNumber: 'Consecutivo',
-  productId: 'Producto ID',
-  lotId: 'Lote ID',
-  revertedMovementId: 'Mov. revertido',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  ACTIVE: 'Activo', REMNANT: 'Remanente', DEPLETED: 'Agotado',
-  DEFECTIVE: 'Defectuoso', WRITTEN_OFF: 'Dado de baja',
-};
-
-function formatAuditValue(key: string, value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  if (key === 'status' && typeof value === 'string') return STATUS_LABEL[value] ?? value;
-  if (key === 'isRemnant') return value ? 'Sí' : 'No';
-  if ((key === 'pricePerMeter' || key === 'priceB2B') && typeof value === 'number') {
-    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value);
-  }
-  return String(value);
-}
-
-function formatAuditData(jsonStr: string | null): string {
-  if (!jsonStr) return '—';
-  try {
-    const data = JSON.parse(jsonStr) as Record<string, unknown>;
-    return Object.entries(data)
-      .map(([k, v]) => `${FIELD_LABELS[k] ?? k}: ${formatAuditValue(k, v)}`)
-      .join(' · ');
-  } catch {
-    return jsonStr;
-  }
-}
+const FILTER_GROUPS = [
+  {
+    label: 'Entradas y salidas',
+    options: [
+      { value: 'ENTRY', label: 'Entrada de rollo' },
+      { value: 'EXIT_FULL', label: 'Salida completa' },
+      { value: 'EXIT_PARTIAL', label: 'Corte de rollo' },
+      { value: 'RETURN', label: 'Devolución' },
+      { value: 'REVERT_SALE', label: 'Venta revertida' },
+      { value: 'ADJUSTMENT', label: 'Ajuste de metros' },
+    ],
+  },
+  {
+    label: 'Bajas de inventario',
+    options: [
+      { value: 'WRITE_OFF_PENDING', label: 'Baja — solicitada' },
+      { value: 'WRITE_OFF_APPROVED', label: 'Baja — aprobada' },
+      { value: 'WRITE_OFF_REJECTED', label: 'Baja — rechazada' },
+    ],
+  },
+  {
+    label: 'Defectos con descuento',
+    options: [
+      { value: 'DEFECT_DISCOUNT_PENDING', label: 'Defecto descuento — solicitado' },
+      { value: 'DEFECT_DISCOUNT_APPROVED', label: 'Defecto descuento — aprobado' },
+      { value: 'DEFECT_DISCOUNT_REJECTED', label: 'Defecto descuento — rechazado' },
+      { value: 'DEFECT_CLEARED', label: 'Defecto eliminado' },
+    ],
+  },
+  {
+    label: 'Reposiciones',
+    options: [
+      { value: 'DEFECT_REPLACEMENT_PENDING', label: 'Reposición — solicitada' },
+      { value: 'DEFECT_REPLACEMENT_APPROVED', label: 'Reposición — aprobada' },
+      { value: 'DEFECT_REPLACEMENT_REJECTED', label: 'Reposición — rechazada' },
+    ],
+  },
+  {
+    label: 'Otros',
+    options: [
+      { value: 'CREATE_CLIENT', label: 'Cliente creado' },
+    ],
+  },
+];
 
 export default function AuditClient({ logs, users }: { logs: AuditLog[]; users: User[] }) {
   const [actionFilter, setActionFilter] = useState('');
@@ -105,14 +85,13 @@ export default function AuditClient({ logs, users }: { logs: AuditLog[]; users: 
         <select value={actionFilter} onChange={e => setActionFilter(e.target.value)}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Todas las acciones</option>
-          <option value="ENTRY">Entrada</option>
-          <option value="EXIT_FULL">Salida total</option>
-          <option value="EXIT_PARTIAL">Salida parcial</option>
-          <option value="RETURN">Devolución</option>
-          <option value="REVERT_SALE">Reversión</option>
-          <option value="ADJUSTMENT">Ajuste</option>
-          <option value="WRITE_OFF">Baja</option>
-          <option value="CREATE_CLIENT">Crear cliente</option>
+          {FILTER_GROUPS.map(g => (
+            <optgroup key={g.label} label={g.label}>
+              {g.options.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </optgroup>
+          ))}
         </select>
         <select value={userFilter} onChange={e => setUserFilter(e.target.value)}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
@@ -169,18 +148,18 @@ export default function AuditClient({ logs, users }: { logs: AuditLog[]; users: 
                       <div className="text-gray-400 text-xs">{log.userEmail}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${ACTION_CLASS[log.action] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {ACTION_LABEL[log.action] ?? log.action}
+                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${ACTION_COLORS[log.action] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {ACTION_LABELS[log.action] ?? log.action}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600 text-xs font-mono">
                       {log.entity} #{log.entityId}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 max-w-52">
-                      {formatAuditData(log.oldData)}
+                      {formatAuditData(log.oldData, users)}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-700 max-w-52">
-                      {formatAuditData(log.newData)}
+                      {formatAuditData(log.newData, users)}
                     </td>
                   </tr>
                 ))
