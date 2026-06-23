@@ -182,6 +182,9 @@ export default async function RollTracePage({
               <DefectButton
                 rollId={rollIdNum}
                 rollLabel={`${r.disaNumber ?? `ID ${rollIdNum}`} — ${refDisplay}`}
+                currentDefect={Boolean(r.hasDefect)
+                  ? { note: (r.defectNote ?? null) as string | null, pct: (r.defectDiscountPct ?? null) as number | null }
+                  : null}
               />
             )}
             <RollLabelButton data={{

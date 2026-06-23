@@ -11,9 +11,18 @@ const TYPE_OPTIONS = [
 
 type DefectType = typeof TYPE_OPTIONS[number]['value'];
 
-export default function DefectButton({ rollId, rollLabel }: { rollId: number; rollLabel: string }) {
+export default function DefectButton({
+  rollId,
+  rollLabel,
+  currentDefect,
+}: {
+  rollId: number;
+  rollLabel: string;
+  currentDefect: { note: string | null; pct: number | null } | null;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [confirmedReplace, setConfirmedReplace] = useState(false);
   const [type, setType] = useState<DefectType>('WRITE_OFF');
   const [notes, setNotes] = useState('');
   const [defectDiscountPct, setDefectDiscountPct] = useState('');
@@ -22,6 +31,17 @@ export default function DefectButton({ rollId, rollLabel }: { rollId: number; ro
 
   function resetForm() {
     setType('WRITE_OFF'); setNotes(''); setDefectDiscountPct(''); setError('');
+  }
+
+  function handleOpen() {
+    setConfirmedReplace(false);
+    setOpen(true);
+  }
+
+  function handleClose() {
+    setOpen(false);
+    setConfirmedReplace(false);
+    resetForm();
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -41,7 +61,7 @@ export default function DefectButton({ rollId, rollLabel }: { rollId: number; ro
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? 'Error al reportar'); return; }
-      setOpen(false); resetForm(); router.refresh();
+      handleClose(); router.refresh();
     } catch {
       setError('Error de conexión');
     } finally {
@@ -53,23 +73,56 @@ export default function DefectButton({ rollId, rollLabel }: { rollId: number; ro
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={handleOpen}
         className="text-xs text-red-600 hover:text-red-800 border border-red-200 hover:border-red-400 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition-colors whitespace-nowrap"
       >
         ⚠ Reportar baja
       </button>
 
       {open && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setOpen(false); resetForm(); }}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={handleClose}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-base font-semibold text-gray-900">Reportar defecto / baja</h2>
                 <p className="text-xs text-gray-400 mt-0.5">{rollLabel}</p>
               </div>
-              <button type="button" onClick={() => { setOpen(false); resetForm(); }} className="text-gray-400 hover:text-gray-600 text-lg leading-none ml-4">✕</button>
+              <button type="button" onClick={handleClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none ml-4">✕</button>
             </div>
 
+            {/* Confirmation step — shown only when an active defect exists and not yet confirmed */}
+            {currentDefect && !confirmedReplace ? (
+              <div className="space-y-4">
+                <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
+                  <p className="text-xs font-semibold text-orange-800 uppercase tracking-wide mb-1.5">Defecto activo</p>
+                  {currentDefect.pct !== null && (
+                    <p className="text-sm text-orange-900 font-medium">{currentDefect.pct}% de descuento sugerido</p>
+                  )}
+                  {currentDefect.note && (
+                    <p className="text-xs text-orange-700 mt-1 italic">{currentDefect.note}</p>
+                  )}
+                </div>
+                <p className="text-sm text-gray-700">
+                  Este rollo ya tiene un defecto aprobado. Reportar uno nuevo <span className="font-semibold">reemplazará</span> la nota y el % de descuento actuales al aprobarse.
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="flex-1 border border-[#E5E5E5] rounded px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmedReplace(true)}
+                    className="flex-1 bg-red-600 text-white rounded px-3 py-2.5 text-sm font-medium hover:bg-red-700 transition-colors"
+                  >
+                    Sí, reemplazar
+                  </button>
+                </div>
+              </div>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wide">Tipo de baja</label>
@@ -127,7 +180,7 @@ export default function DefectButton({ rollId, rollLabel }: { rollId: number; ro
               </div>
 
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={() => { setOpen(false); resetForm(); }}
+                <button type="button" onClick={handleClose}
                   className="flex-1 border border-[#E5E5E5] rounded px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
                   Cancelar
                 </button>
@@ -137,6 +190,7 @@ export default function DefectButton({ rollId, rollLabel }: { rollId: number; ro
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}
