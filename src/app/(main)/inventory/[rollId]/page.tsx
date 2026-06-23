@@ -6,6 +6,7 @@ import { getBlackoutColorName, isBlackoutProduct } from '@/lib/colorMap';
 import { formatColombianDate } from '@/lib/dateUtils';
 import ReimprimirButton from './ReimprimirButton';
 import RollLabelButton from './RollLabelButton';
+import DefectButton from './DefectButton';
 
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'Activo',
@@ -20,8 +21,10 @@ const MOVEMENT_LABEL: Record<string, string> = {
   EXIT_FULL: 'Salida completa',
   EXIT_PARTIAL: 'Corte parcial',
   ADJUSTMENT: 'Ajuste',
-  WRITE_OFF: 'Baja',
+  WRITE_OFF: 'Baja total',
   RETURN: 'Devolución',
+  DEFECT_DISCOUNT: 'Defecto con descuento',
+  DEFECT_REPLACEMENT: 'Defecto con reposición',
 };
 
 const MOVEMENT_EMOJI: Record<string, string> = {
@@ -31,6 +34,8 @@ const MOVEMENT_EMOJI: Record<string, string> = {
   ADJUSTMENT: '🔧',
   WRITE_OFF: '🗑️',
   RETURN: '↩️',
+  DEFECT_DISCOUNT: '⚠️',
+  DEFECT_REPLACEMENT: '🔄',
 };
 
 const MOVEMENT_COLOR: Record<string, string> = {
@@ -40,6 +45,8 @@ const MOVEMENT_COLOR: Record<string, string> = {
   ADJUSTMENT: 'bg-blue-100 text-blue-700 border-blue-200',
   WRITE_OFF: 'bg-gray-100 text-gray-600 border-gray-200',
   RETURN: 'bg-green-100 text-green-700 border-green-200',
+  DEFECT_DISCOUNT: 'bg-orange-100 text-orange-700 border-orange-200',
+  DEFECT_REPLACEMENT: 'bg-purple-100 text-purple-700 border-purple-200',
 };
 
 function formatCOP(n: number): string {
@@ -93,7 +100,9 @@ export default async function RollTracePage({
 
   const movRes = await dbAny.from('Movement').select(`
     id, type, meters, notes, createdAt, reverted, pricePerMeter, discount, total, saleId,
+    approvalStatus, approvedAt,
     user:userId(name),
+    approver:approvedBy(name),
     sale:saleId(clientName, client:clientId(name, type))
   `).eq('rollId', rollIdNum).order('createdAt', { ascending: true });
 
@@ -124,6 +133,9 @@ export default async function RollTracePage({
       clientName: m.sale?.clientName ?? m.sale?.client?.name ?? null,
       clientType: m.sale?.client?.type ?? null,
       reverted: Boolean(m.reverted),
+      approvalStatus: (m.approvalStatus ?? 'APPROVED') as string,
+      approvedAt: (m.approvedAt ?? null) as number | null,
+      approverName: (m.approver?.name ?? null) as string | null,
     };
   });
 
@@ -160,16 +172,24 @@ export default async function RollTracePage({
       <div className="bg-white border border-[#E5E5E5] rounded-lg p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ficha del rollo</h2>
-          <RollLabelButton data={{
-            consecutivo: r.disaNumber ?? `ID ${rollIdNum}`,
-            referencia: refDisplay || '—',
-            color: displayColor,
-            anchoStr: r.product?.width ? `${r.product.width} cm` : '—',
-            metrosActuales: r.currentMeters as number,
-            metrosIniciales: r.initialMeters as number,
-            estado: STATUS_LABEL[r.status] ?? r.status,
-            actualizadoEn: new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' }),
-          }} />
+          <div className="flex items-center gap-2">
+            {(r.status === 'ACTIVE' || r.status === 'REMNANT') && (
+              <DefectButton
+                rollId={rollIdNum}
+                rollLabel={`${r.disaNumber ?? `ID ${rollIdNum}`} — ${refDisplay}`}
+              />
+            )}
+            <RollLabelButton data={{
+              consecutivo: r.disaNumber ?? `ID ${rollIdNum}`,
+              referencia: refDisplay || '—',
+              color: displayColor,
+              anchoStr: r.product?.width ? `${r.product.width} cm` : '—',
+              metrosActuales: r.currentMeters as number,
+              metrosIniciales: r.initialMeters as number,
+              estado: STATUS_LABEL[r.status] ?? r.status,
+              actualizadoEn: new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' }),
+            }} />
+          </div>
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
           {[
@@ -228,6 +248,22 @@ export default async function RollTracePage({
                           )}
                           {m.reverted && (
                             <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Revertida</span>
+                          )}
+                          {/* Approval status badges for defect/write-off movements */}
+                          {(m.type === 'WRITE_OFF' || m.type === 'DEFECT_DISCOUNT' || m.type === 'DEFECT_REPLACEMENT') && (
+                            m.approvalStatus === 'PENDING' ? (
+                              <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                ⚠️ Pendiente de aprobación
+                              </span>
+                            ) : m.approvalStatus === 'APPROVED' ? (
+                              <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                ✅ Aprobado{m.approverName ? ` por ${m.approverName}` : ''}
+                              </span>
+                            ) : m.approvalStatus === 'REJECTED' ? (
+                              <span className="text-xs bg-red-100 text-red-700 border border-red-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                ❌ Rechazado{m.approverName ? ` por ${m.approverName}` : ''}
+                              </span>
+                            ) : null
                           )}
                           {/* Reimprimir tirilla for exit movements with price data */}
                           {isExitMov && !m.reverted && m.pricePerMeter && m.total && m.clientName && (

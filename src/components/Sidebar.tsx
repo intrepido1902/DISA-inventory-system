@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -11,6 +11,7 @@ import {
   Users,
   UserCog,
   ClipboardList,
+  AlertTriangle,
   LogOut,
   type LucideIcon,
 } from 'lucide-react';
@@ -30,13 +31,14 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/inventory',  icon: Package,          label: 'Inventario',  roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/movements',  icon: ArrowRightLeft,   label: 'Movimientos', roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/catalog',    icon: BookOpen,          label: 'Catálogo',    roles: ['OWNER', 'ADMIN'] },
-  { href: '/clients',    icon: Users,             label: 'Clientes',    roles: ['OWNER', 'ADMIN'] },
-  { href: '/users',      icon: UserCog,           label: 'Usuarios',    roles: ['OWNER'] },
-  { href: '/audit',      icon: ClipboardList,     label: 'Auditoría',   roles: ['OWNER', 'ADMIN'] },
+  { href: '/dashboard',        icon: LayoutDashboard, label: 'Dashboard',        roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/inventory',        icon: Package,          label: 'Inventario',       roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/movements',        icon: ArrowRightLeft,   label: 'Movimientos',      roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
+  { href: '/catalog',          icon: BookOpen,          label: 'Catálogo',         roles: ['OWNER', 'ADMIN'] },
+  { href: '/clients',          icon: Users,             label: 'Clientes',         roles: ['OWNER', 'ADMIN'] },
+  { href: '/pending-defects',  icon: AlertTriangle,     label: 'Bajas pendientes', roles: ['OWNER'] },
+  { href: '/users',            icon: UserCog,           label: 'Usuarios',         roles: ['OWNER'] },
+  { href: '/audit',            icon: ClipboardList,     label: 'Auditoría',        roles: ['OWNER', 'ADMIN'] },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -55,6 +57,16 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Fetch pending defect count for OWNER badge
+  useEffect(() => {
+    if (user.role !== 'OWNER') return;
+    fetch('/api/movements/pending')
+      .then(r => r.json())
+      .then(data => Array.isArray(data) && setPendingCount(data.length))
+      .catch(() => {});
+  }, [user.role]);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -87,6 +99,7 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
           {userItems.map(item => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
             const Icon = item.icon;
+            const hasBadge = item.href === '/pending-defects' && pendingCount > 0;
             return (
               <Link
                 key={item.href}
@@ -97,7 +110,12 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
                 }`}
               >
                 <Icon size={16} className="flex-shrink-0" />
-                <span>{item.label}</span>
+                <span className="flex-1">{item.label}</span>
+                {hasBadge && (
+                  <span className="bg-amber-400 text-black text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0">
+                    {pendingCount > 9 ? '9+' : pendingCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -139,16 +157,22 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
         {userItems.map(item => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
           const Icon = item.icon;
+          const hasBadge = item.href === '/pending-defects' && pendingCount > 0;
           return (
             <Link
               key={item.href}
               href={item.href}
-              title={item.label}
-              className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+              title={hasBadge ? `${item.label} (${pendingCount} pendiente${pendingCount !== 1 ? 's' : ''})` : item.label}
+              className={`relative w-10 h-10 flex items-center justify-center rounded transition-colors ${
                 isActive ? 'bg-white text-black' : 'text-[#555] hover:text-white hover:bg-[#1A1A1A]'
               }`}
             >
               <Icon size={18} />
+              {hasBadge && (
+                <span className="absolute -top-0.5 -right-0.5 bg-amber-400 text-black text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">
+                  {pendingCount > 9 ? '9' : pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}
