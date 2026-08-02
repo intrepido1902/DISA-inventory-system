@@ -17,6 +17,7 @@ async function getDashboardData(role: string) {
   const isManager = role === 'OWNER' || role === 'ADMIN';
   const dayStart = new Date().setHours(0, 0, 0, 0);
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
 
   // BUG 2 FIX: use count:exact + head:true so Supabase returns the real count
   // without fetching rows (bypasses the 1000-row default limit).
@@ -27,6 +28,8 @@ async function getDashboardData(role: string) {
     allProductsRes,
     todayMovRes,
     monthMovRes,
+    salesMesRes,
+    salesTotalesRes,
   ] = await Promise.all([
     db.from('Roll').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
     db.from('Roll').select('*', { count: 'exact', head: true }).eq('status', 'REMNANT'),
@@ -45,6 +48,12 @@ async function getDashboardData(role: string) {
           roll:rollId(productId),
           sale:saleId(clientId, total)
         `).in('type', ['EXIT_FULL', 'EXIT_PARTIAL']).gte('createdAt', thirtyDaysAgo)
+      : Promise.resolve({ data: [] }),
+    isOwner
+      ? (db as any).from('Sale').select('total').gte('createdAt', monthStart)
+      : Promise.resolve({ data: [] }),
+    isOwner
+      ? (db as any).from('Sale').select('total')
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -87,7 +96,6 @@ async function getDashboardData(role: string) {
   let topProductLastMonth: { name: string; code: string; meters: number } | null = null;
   let totalMetersThisMonth = 0;
   const productMetersLastMonth = new Map<number, number>();
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
 
   for (const m of monthMov) {
     const meters = (m.meters as number) ?? 0;
@@ -123,11 +131,19 @@ async function getDashboardData(role: string) {
         .reduce((sum, m) => sum + (m.saleTotal ?? 0), 0)
     : null;
 
+  const ventasMes = isOwner
+    ? ((salesMesRes as any).data ?? []).reduce((s: number, r: any) => s + (r.total ?? 0), 0)
+    : null;
+  const ventasTotales = isOwner
+    ? ((salesTotalesRes as any).data ?? []).reduce((s: number, r: any) => s + (r.total ?? 0), 0)
+    : null;
+
   return {
     totalActiveRolls, totalRemnantRolls,
     lowStockProducts, mostStockedProduct,
     topProductLastMonth, totalMetersThisMonth,
     todayMovements, dayTotal, isOwner, isManager,
+    ventasMes, ventasTotales,
   };
 }
 
@@ -197,6 +213,20 @@ export default async function DashboardPage() {
               label="Metros vendidos este mes"
               value={formatMeters(data.totalMetersThisMonth)}
               sub="salidas del mes actual"
+            />
+          </>
+        )}
+        {data.isOwner && (
+          <>
+            <StatCard
+              label="Ventas del mes"
+              value={data.ventasMes !== null ? formatCOP(data.ventasMes) : '—'}
+              sub="mes actual en COP"
+            />
+            <StatCard
+              label="Ventas totales"
+              value={data.ventasTotales !== null ? formatCOP(data.ventasTotales) : '—'}
+              sub="historial completo"
             />
           </>
         )}
