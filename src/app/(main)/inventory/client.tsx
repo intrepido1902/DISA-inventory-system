@@ -230,8 +230,7 @@ export default function InventoryClient({
         r.product.code,
         r.product.name,
       ].some(s => s.toLowerCase().includes(q));
-      const matchCategory = !categoryFilter ||
-        (categoryFilter === 'Velo' ? r.category.id === 1 : r.category.id === 2);
+      const matchCategory = !categoryFilter || r.category.id === parseInt(categoryFilter);
       const matchColor = !colorFilter || r.product.color === colorFilter;
       const matchStatus = !statusFilter || r.status === statusFilter;
       return matchSearch && matchCategory && matchColor && matchStatus;
@@ -669,8 +668,8 @@ export default function InventoryClient({
         <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Todas</option>
-          <option value="Velo">Velo</option>
-          <option value="Blackout">Blackout</option>
+          <option value="1">Velo</option>
+          <option value="2">Blackout</option>
         </select>
         <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
@@ -712,8 +711,8 @@ export default function InventoryClient({
           <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
             className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
             <option value="">Todas las categorías</option>
-            <option value="Velo">Velo</option>
-            <option value="Blackout">Blackout</option>
+            <option value="1">Velo</option>
+            <option value="2">Blackout</option>
           </select>
           <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
             className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">

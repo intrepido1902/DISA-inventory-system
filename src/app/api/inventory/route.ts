@@ -74,11 +74,9 @@ export async function GET(request: NextRequest) {
     let productIdFilter: number[] | null = null;
 
     if (categoryFilter) {
-      const { data: catRow } = await db
-        .from('Category').select('id').eq('name', categoryFilter).maybeSingle();
-      if (!catRow) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
-      const { data: pRows } = await db
-        .from('Product').select('id').eq('categoryId', (catRow as any).id);
+      const catId = parseInt(categoryFilter);
+      if (isNaN(catId)) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
+      const { data: pRows } = await db.from('Product').select('id').eq('categoryId', catId);
       const ids = (pRows ?? []).map((p: any) => p.id as number);
       if (ids.length === 0) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
       productIdFilter = ids;
