@@ -2,11 +2,20 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Eye, EyeOff } from 'lucide-react';
 
-export default function ChangePasswordForm({ token }: { token: string }) {
+export default function ChangePasswordForm({
+  token,
+  firstName,
+}: {
+  token: string;
+  firstName: string;
+}) {
   const router = useRouter();
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -15,7 +24,7 @@ export default function ChangePasswordForm({ token }: { token: string }) {
     setError('');
 
     if (newPassword.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres.');
+      setError('Mínimo 8 caracteres.');
       return;
     }
     if (newPassword !== confirm) {
@@ -36,7 +45,10 @@ export default function ChangePasswordForm({ token }: { token: string }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? 'Error al cambiar la contraseña.');
+        const msg = data.error ?? 'Error al cambiar la contraseña.';
+        setError(
+          msg.includes('igual') ? 'Debe ser diferente a la contraseña actual.' : msg,
+        );
         return;
       }
       router.push(data.role === 'DEVELOPER' ? '/dev' : '/dashboard');
@@ -58,9 +70,11 @@ export default function ChangePasswordForm({ token }: { token: string }) {
           <span className="text-white text-2xl font-semibold tracking-[0.2em] uppercase">DISA</span>
         </div>
 
-        <h1 className="text-white text-2xl font-semibold mb-1">Crea tu contraseña</h1>
+        <h1 className="text-white text-2xl font-semibold mb-1">
+          {firstName ? `Hola ${firstName}.` : 'Bienvenido/a.'}
+        </h1>
         <p className="text-[#666] text-sm mb-8">
-          Bienvenido/a. Elige una contraseña segura para acceder al sistema.
+          Crea tu contraseña para comenzar.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -68,30 +82,50 @@ export default function ChangePasswordForm({ token }: { token: string }) {
             <label className="block text-[#888] text-xs uppercase tracking-wider mb-1.5">
               Nueva contraseña
             </label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-              required
-              autoComplete="new-password"
-              placeholder="Mínimo 8 caracteres"
-              className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white placeholder-[#444] rounded px-4 py-3 text-sm focus:outline-none focus:border-[#444] transition-colors"
-            />
+            <div className="relative">
+              <input
+                type={showNew ? 'text' : 'password'}
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                required
+                autoComplete="new-password"
+                placeholder="Mínimo 8 caracteres"
+                className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white placeholder-[#444] rounded px-4 py-3 pr-12 text-sm focus:outline-none focus:border-[#444] transition-colors"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNew(v => !v)}
+                className="absolute right-0 top-0 h-full w-11 flex items-center justify-center text-[#555] hover:text-[#999] transition-colors"
+                aria-label={showNew ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              >
+                {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
 
           <div>
             <label className="block text-[#888] text-xs uppercase tracking-wider mb-1.5">
               Confirmar contraseña
             </label>
-            <input
-              type="password"
-              value={confirm}
-              onChange={e => setConfirm(e.target.value)}
-              required
-              autoComplete="new-password"
-              placeholder="Repite tu contraseña"
-              className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white placeholder-[#444] rounded px-4 py-3 text-sm focus:outline-none focus:border-[#444] transition-colors"
-            />
+            <div className="relative">
+              <input
+                type={showConfirm ? 'text' : 'password'}
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                required
+                autoComplete="new-password"
+                placeholder="Repite tu contraseña"
+                className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white placeholder-[#444] rounded px-4 py-3 pr-12 text-sm focus:outline-none focus:border-[#444] transition-colors"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirm(v => !v)}
+                className="absolute right-0 top-0 h-full w-11 flex items-center justify-center text-[#555] hover:text-[#999] transition-colors"
+                aria-label={showConfirm ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              >
+                {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
 
           {error && (
