@@ -282,6 +282,9 @@ export default function InventoryClient({
     const ctrl = new AbortController();
     const params = new URLSearchParams({ page: String(serverPage), limit: String(SERVER_LIMIT) });
     if (tab === 'remnants') params.set('isRemnant', 'true');
+    if (categoryFilter) params.set('category', categoryFilter);
+    if (statusFilter) params.set('status', statusFilter);
+    if (colorFilter) params.set('color', colorFilter);
     setIsFetching(true);
     fetch(`/api/inventory?${params}`, { signal: ctrl.signal })
       .then(r => r.json())
@@ -295,7 +298,7 @@ export default function InventoryClient({
       .catch(e => { if (e.name !== 'AbortError') console.error('inventory fetch error:', e); })
       .finally(() => setIsFetching(false));
     return () => ctrl.abort();
-  }, [serverPage, tab]);
+  }, [serverPage, tab, categoryFilter, statusFilter, colorFilter]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -376,6 +379,7 @@ export default function InventoryClient({
 
   function clearFilters() {
     setSearch(''); setCategoryFilter(''); setStatusFilter(''); setColorFilter('');
+    setServerPage(1);
     updateUrl({});
   }
 
@@ -662,18 +666,18 @@ export default function InventoryClient({
             placeholder="Buscar..."
             className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
         </div>
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+        <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Todas</option>
           <option value="Velo">Velo</option>
           <option value="Blackout">Blackout</option>
         </select>
-        <select value={colorFilter} onChange={e => setColorFilter(e.target.value)}
+        <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Color</option>
           {availableColors.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setServerPage(1); }}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
           <option value="">Estado</option>
           <option value="ACTIVE">Activo</option>
@@ -705,18 +709,18 @@ export default function InventoryClient({
 
       {showFiltersPanel && (
         <div className="md:hidden bg-white border border-[#E5E5E5] rounded-lg p-4 mb-3 space-y-3">
-          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+          <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
             className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
             <option value="">Todas las categorías</option>
             <option value="Velo">Velo</option>
             <option value="Blackout">Blackout</option>
           </select>
-          <select value={colorFilter} onChange={e => setColorFilter(e.target.value)}
+          <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
             className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
             <option value="">Todos los colores</option>
             {availableColors.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setServerPage(1); }}
             className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
             <option value="">Todos los estados</option>
             <option value="ACTIVE">Activo</option>
