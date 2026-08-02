@@ -10,7 +10,7 @@ async function getDevData() {
     db.from('Roll').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
     dbAny
       .from('User')
-      .select('id, email, name, role, active, mustChangePassword, createdAt')
+      .select('id, email, username, name, role, active, mustChangePassword, createdAt')
       .order('createdAt', { ascending: true }),
     dbAny
       .from('Movement')

@@ -10,15 +10,17 @@ function randomPassword(len = 12) {
   return out;
 }
 
+const USERNAME_RE = /^[a-z0-9_]{1,20}$/;
+
 export async function GET() {
   const session = await getSession();
   if (!session || session.role !== 'DEVELOPER') {
     return Response.json({ error: 'No autorizado' }, { status: 403 });
   }
 
-  const { data, error } = await db
+  const { data, error } = await (db as any)
     .from('User')
-    .select('id, email, name, role, active, mustChangePassword, createdAt')
+    .select('id, email, username, name, role, active, mustChangePassword, createdAt')
     .order('createdAt', { ascending: true });
 
   if (error) return Response.json({ error: 'Error al obtener usuarios' }, { status: 500 });
@@ -31,9 +33,17 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'No autorizado' }, { status: 403 });
   }
 
-  const { email, name, role } = await request.json();
-  if (!email || !name || !role) {
-    return Response.json({ error: 'email, name y role son requeridos' }, { status: 400 });
+  const { email, name, role, username } = await request.json();
+  if (!email || !name || !role || !username) {
+    return Response.json({ error: 'email, name, role y username son requeridos' }, { status: 400 });
+  }
+
+  const normalizedUsername = String(username).toLowerCase().trim();
+  if (!USERNAME_RE.test(normalizedUsername)) {
+    return Response.json(
+      { error: 'El usuario solo puede tener letras minúsculas, números y guion bajo (máx. 20 caracteres)' },
+      { status: 400 },
+    );
   }
 
   const ALLOWED_ROLES = ['OWNER', 'ADMIN', 'WAREHOUSE'];
@@ -46,17 +56,29 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await (db as any)
     .from('User')
-    .insert({ email, name, role, password: hash, mustChangePassword: true, active: 1, createdAt: Date.now() })
-    .select('id, email, name, role')
+    .insert({
+      email,
+      name,
+      role,
+      username: normalizedUsername,
+      password: hash,
+      mustChangePassword: true,
+      active: 1,
+      createdAt: Date.now(),
+    })
+    .select('id, email, username, name, role')
     .single();
 
   if (error) {
     if ((error as any).code === '23505') {
+      const detail = String((error as any).detail ?? '');
+      if (detail.includes('username')) {
+        return Response.json({ error: 'Ese nombre de usuario ya está en uso' }, { status: 409 });
+      }
       return Response.json({ error: 'Ya existe un usuario con ese correo' }, { status: 409 });
     }
     return Response.json({ error: 'Error al crear usuario' }, { status: 500 });
   }
 
-  // Return tempPassword in plaintext ONCE — never stored in DB as plaintext
   return Response.json({ ...data, tempPassword }, { status: 201 });
 }

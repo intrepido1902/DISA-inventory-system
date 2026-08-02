@@ -20,8 +20,10 @@ const MOV_LABEL: Record<string, string> = {
   WRITE_OFF_APPROVED: 'Baja aprobada', WRITE_OFF_REJECTED: 'Baja rechazada',
 };
 
+const USERNAME_RE = /^[a-z0-9_]{1,20}$/;
+
 interface User {
-  id: number; email: string; name: string; role: string;
+  id: number; email: string; username: string | null; name: string; role: string;
   active: number; mustChangePassword: boolean; createdAt: number;
 }
 interface Movement {
@@ -44,28 +46,44 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
   const [creating, setCreating] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
+  const [newUsername, setNewUsername] = useState('');
   const [newRole, setNewRole] = useState('WAREHOUSE');
+  const [usernameError, setUsernameError] = useState('');
   const [createError, setCreateError] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
-  const [createdTemp, setCreatedTemp] = useState<{ name: string; email: string; tempPassword: string } | null>(null);
+  const [createdTemp, setCreatedTemp] = useState<{ name: string; username: string; tempPassword: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [resetResult, setResetResult] = useState<{ userId: number; tempPassword: string } | null>(null);
+
+  function handleUsernameChange(val: string) {
+    const lower = val.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
+    setNewUsername(lower);
+    if (lower && !USERNAME_RE.test(lower)) {
+      setUsernameError('Solo letras minúsculas, números y guion bajo. Máx. 20 caracteres.');
+    } else {
+      setUsernameError('');
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setCreateError('');
+    if (!USERNAME_RE.test(newUsername)) {
+      setUsernameError('Solo letras minúsculas, números y guion bajo. Máx. 20 caracteres.');
+      return;
+    }
     setCreateLoading(true);
     try {
       const res = await fetch('/api/dev/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: newEmail.trim(), name: newName.trim(), role: newRole }),
+        body: JSON.stringify({ email: newEmail.trim(), name: newName.trim(), role: newRole, username: newUsername }),
       });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error ?? 'Error al crear usuario'); return; }
       setUsers(prev => [...prev, { ...data, active: 1, mustChangePassword: true, createdAt: Date.now() }]);
-      setCreatedTemp({ name: data.name, email: data.email, tempPassword: data.tempPassword });
-      setNewEmail(''); setNewName(''); setNewRole('WAREHOUSE'); setCreating(false);
+      setCreatedTemp({ name: data.name, username: data.username, tempPassword: data.tempPassword });
+      setNewEmail(''); setNewName(''); setNewUsername(''); setNewRole('WAREHOUSE'); setCreating(false);
     } catch {
       setCreateError('Error de conexión');
     } finally {
@@ -106,8 +124,8 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white p-4 lg:p-8">
-      {/* Header */}
       <div className="max-w-5xl mx-auto">
+        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white flex items-center justify-center flex-shrink-0">
@@ -120,10 +138,7 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
           </div>
           <div className="flex items-center gap-4">
             <span className="text-[#666] text-sm">{developerName}</span>
-            <button
-              onClick={handleLogout}
-              className="text-[#666] text-sm hover:text-white transition-colors"
-            >
+            <button onClick={handleLogout} className="text-[#666] text-sm hover:text-white transition-colors">
               Salir
             </button>
           </div>
@@ -147,7 +162,7 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-emerald-400 font-semibold text-sm mb-1">Usuario creado: {createdTemp.name}</p>
-                <p className="text-emerald-300 text-xs mb-2">{createdTemp.email}</p>
+                <p className="text-emerald-300 text-xs mb-2 font-mono">@{createdTemp.username}</p>
                 <p className="text-[#888] text-xs mb-1">Contraseña temporal (mostrar UNA sola vez):</p>
                 <p className="font-mono text-emerald-200 text-base bg-black/40 rounded px-3 py-2 inline-block">
                   {createdTemp.tempPassword}
@@ -179,7 +194,7 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
           <div className="px-5 py-4 border-b border-[#222] flex items-center justify-between">
             <h2 className="font-semibold text-white">Usuarios del sistema</h2>
             <button
-              onClick={() => { setCreating(v => !v); setCreateError(''); }}
+              onClick={() => { setCreating(v => !v); setCreateError(''); setUsernameError(''); }}
               className="text-xs bg-white text-black font-semibold px-3 py-1.5 rounded hover:bg-gray-100 transition-colors"
             >
               {creating ? 'Cancelar' : '+ Nuevo usuario'}
@@ -188,14 +203,28 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
 
           {creating && (
             <form onSubmit={handleCreate} className="px-5 py-4 border-b border-[#222] bg-[#0D0D0D]">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                 <div>
-                  <label className="block text-[#888] text-xs uppercase tracking-wider mb-1">Nombre</label>
+                  <label className="block text-[#888] text-xs uppercase tracking-wider mb-1">Nombre completo</label>
                   <input
                     value={newName} onChange={e => setNewName(e.target.value)} required
                     placeholder="Nombre completo"
                     className="w-full bg-[#1A1A1A] border border-[#333] text-white placeholder-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-[#555]"
                   />
+                </div>
+                <div>
+                  <label className="block text-[#888] text-xs uppercase tracking-wider mb-1">
+                    Nombre de usuario
+                    <span className="ml-1 normal-case text-[#555]">(solo letras/números/_)</span>
+                  </label>
+                  <input
+                    value={newUsername}
+                    onChange={e => handleUsernameChange(e.target.value)}
+                    required
+                    placeholder="ej: bodega2"
+                    className={`w-full bg-[#1A1A1A] border text-white placeholder-[#444] rounded px-3 py-2 text-sm focus:outline-none transition-colors ${usernameError ? 'border-red-700 focus:border-red-500' : 'border-[#333] focus:border-[#555]'}`}
+                  />
+                  {usernameError && <p className="text-red-400 text-xs mt-1">{usernameError}</p>}
                 </div>
                 <div>
                   <label className="block text-[#888] text-xs uppercase tracking-wider mb-1">Correo</label>
@@ -221,7 +250,7 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
                 <p className="text-red-400 text-xs mb-3 bg-red-950/30 border border-red-900 rounded px-3 py-2">{createError}</p>
               )}
               <button
-                type="submit" disabled={createLoading}
+                type="submit" disabled={createLoading || !!usernameError}
                 className="bg-white text-black text-sm font-semibold px-4 py-2 rounded hover:bg-gray-100 disabled:opacity-50 transition-colors"
               >
                 {createLoading ? 'Creando...' : 'Crear usuario'}
@@ -230,11 +259,11 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[600px]">
+            <table className="w-full text-sm min-w-[680px]">
               <thead>
                 <tr className="border-b border-[#222] text-xs text-[#666] uppercase tracking-wide">
                   <th className="px-5 py-3 text-left">Nombre</th>
-                  <th className="px-5 py-3 text-left">Correo</th>
+                  <th className="px-5 py-3 text-left">Usuario</th>
                   <th className="px-5 py-3 text-left">Rol</th>
                   <th className="px-5 py-3 text-left">Estado</th>
                   <th className="px-5 py-3 text-left">Acciones</th>
@@ -258,7 +287,9 @@ export default function DevPanel({ developerName, userCount, activeRolls, initia
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-3 text-[#888]">{u.email}</td>
+                      <td className="px-5 py-3 font-mono text-[#888] text-xs">
+                        {u.username ? `@${u.username}` : <span className="text-[#444]">—</span>}
+                      </td>
                       <td className="px-5 py-3">
                         {u.role === 'DEVELOPER' ? (
                           <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_CLASS[u.role] ?? 'bg-gray-700 text-gray-300'}`}>
