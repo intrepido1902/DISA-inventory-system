@@ -47,3 +47,21 @@ export async function destroySession(): Promise<void> {
   const store = await cookies();
   store.set(COOKIE, '', { maxAge: 0, path: '/' });
 }
+
+export async function createTempToken(userId: number): Promise<string> {
+  return new SignJWT({ userId, purpose: 'change-password' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('15m')
+    .sign(SECRET);
+}
+
+export async function verifyTempToken(token: string): Promise<{ userId: number } | null> {
+  try {
+    const { payload } = await jwtVerify(token, SECRET);
+    if (payload.purpose !== 'change-password') return null;
+    return { userId: payload.userId as number };
+  } catch {
+    return null;
+  }
+}

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { db } from './db';
 
-export type Role = 'OWNER' | 'ADMIN' | 'WAREHOUSE';
+export type Role = 'OWNER' | 'ADMIN' | 'WAREHOUSE' | 'DEVELOPER';
 
 export interface User {
   id: number;
@@ -9,12 +9,13 @@ export interface User {
   name: string;
   role: Role;
   active: number;
+  mustChangePassword: boolean;
 }
 
 export async function validateUser(email: string, password: string): Promise<User | null> {
   const { data, error } = await db
     .from('User')
-    .select('id, email, password, name, role, active')
+    .select('id, email, password, name, role, active, mustChangePassword')
     .eq('email', email)
     .eq('active', 1)
     .single();
@@ -31,6 +32,7 @@ export async function validateUser(email: string, password: string): Promise<Use
     name: d.name as string,
     role: d.role as Role,
     active: d.active as number,
+    mustChangePassword: Boolean(d.mustChangePassword),
   };
 }
 
@@ -49,6 +51,7 @@ export async function getUserById(id: number): Promise<User | null> {
     name: d.name as string,
     role: d.role as Role,
     active: d.active as number,
+    mustChangePassword: Boolean(d.mustChangePassword),
   };
 }
 

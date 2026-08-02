@@ -3,37 +3,42 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function LoginPage() {
+export default function ChangePasswordForm({ token }: { token: string }) {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    setLoading(true);
 
+    if (newPassword.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (newPassword !== confirm) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+    if (!token) {
+      setError('Enlace inválido. Inicia sesión de nuevo.');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ token, newPassword }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
-        setError(data.error ?? 'Credenciales incorrectas');
+        setError(data.error ?? 'Error al cambiar la contraseña.');
         return;
       }
-
-      if (data.mustChangePassword) {
-        router.push(`/change-password?token=${encodeURIComponent(data.tempToken)}`);
-        return;
-      }
-
       router.push(data.role === 'DEVELOPER' ? '/dev' : '/dashboard');
       router.refresh();
     } catch {
@@ -53,36 +58,38 @@ export default function LoginPage() {
           <span className="text-white text-2xl font-semibold tracking-[0.2em] uppercase">DISA</span>
         </div>
 
-        <h1 className="text-white text-2xl font-semibold mb-1">Iniciar sesión</h1>
-        <p className="text-[#666] text-sm mb-8">Sistema de inventario DISA</p>
+        <h1 className="text-white text-2xl font-semibold mb-1">Crea tu contraseña</h1>
+        <p className="text-[#666] text-sm mb-8">
+          Bienvenido/a. Elige una contraseña segura para acceder al sistema.
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-[#888] text-xs uppercase tracking-wider mb-1.5">
-              Correo electrónico
+              Nueva contraseña
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
+              type="password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
               required
-              autoComplete="email"
-              placeholder="usuario@disa.co"
+              autoComplete="new-password"
+              placeholder="Mínimo 8 caracteres"
               className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white placeholder-[#444] rounded px-4 py-3 text-sm focus:outline-none focus:border-[#444] transition-colors"
             />
           </div>
 
           <div>
             <label className="block text-[#888] text-xs uppercase tracking-wider mb-1.5">
-              Contraseña
+              Confirmar contraseña
             </label>
             <input
               type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
               required
-              autoComplete="current-password"
-              placeholder="••••••••"
+              autoComplete="new-password"
+              placeholder="Repite tu contraseña"
               className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white placeholder-[#444] rounded px-4 py-3 text-sm focus:outline-none focus:border-[#444] transition-colors"
             />
           </div>
@@ -98,7 +105,7 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full bg-white text-black font-semibold rounded px-4 py-3 text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mt-2"
           >
-            {loading ? 'Ingresando...' : 'Ingresar'}
+            {loading ? 'Guardando...' : 'Guardar contraseña'}
           </button>
         </form>
       </div>

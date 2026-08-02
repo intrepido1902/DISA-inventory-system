@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { validateUser } from '@/lib/auth';
-import { createSession } from '@/lib/session';
+import { createSession, createTempToken } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +14,11 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return Response.json({ error: 'Credenciales incorrectas' }, { status: 401 });
+    }
+
+    if (user.mustChangePassword) {
+      const tempToken = await createTempToken(user.id);
+      return Response.json({ mustChangePassword: true, tempToken });
     }
 
     await createSession({
