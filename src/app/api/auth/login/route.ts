@@ -4,13 +4,13 @@ import { createSession, createTempToken } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password } = await request.json();
+    const { username, password } = await request.json();
 
-    if (!email || !password) {
-      return Response.json({ error: 'Correo y contraseña requeridos' }, { status: 400 });
+    if (!username || !password) {
+      return Response.json({ error: 'Usuario y contraseña requeridos' }, { status: 400 });
     }
 
-    const user = await validateUser(String(email), String(password));
+    const user = await validateUser(String(username).toLowerCase().trim(), String(password));
 
     if (!user) {
       return Response.json({ error: 'Credenciales incorrectas' }, { status: 401 });

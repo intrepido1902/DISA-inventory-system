@@ -6,17 +6,18 @@ export type Role = 'OWNER' | 'ADMIN' | 'WAREHOUSE' | 'DEVELOPER';
 export interface User {
   id: number;
   email: string;
+  username: string | null;
   name: string;
   role: Role;
   active: number;
   mustChangePassword: boolean;
 }
 
-export async function validateUser(email: string, password: string): Promise<User | null> {
+export async function validateUser(username: string, password: string): Promise<User | null> {
   const { data, error } = await db
     .from('User')
-    .select('id, email, password, name, role, active, mustChangePassword')
-    .eq('email', email)
+    .select('id, email, username, password, name, role, active, mustChangePassword')
+    .eq('username', username)
     .eq('active', 1)
     .single();
 
@@ -29,6 +30,7 @@ export async function validateUser(email: string, password: string): Promise<Use
   return {
     id: d.id as number,
     email: d.email as string,
+    username: d.username as string | null,
     name: d.name as string,
     role: d.role as Role,
     active: d.active as number,
@@ -48,6 +50,7 @@ export async function getUserById(id: number): Promise<User | null> {
   return {
     id: d.id as number,
     email: d.email as string,
+    username: null,
     name: d.name as string,
     role: d.role as Role,
     active: d.active as number,
