@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatColombianDate } from '@/lib/dateUtils';
 
@@ -45,17 +45,31 @@ function isExit(type: string) {
 }
 
 export default function MovementsClient({
-  movements,
   isOwner,
   canRevert,
 }: {
-  movements: Movement[];
   isOwner: boolean;
   canRevert: boolean;
 }) {
   const router = useRouter();
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
+
+  function fetchMovements() {
+    setLoading(true);
+    fetch('/api/movements')
+      .then(r => r.json())
+      .then((data: unknown) => {
+        setMovements(Array.isArray(data) ? (data as Movement[]) : []);
+      })
+      .catch(() => setMovements([]))
+      .finally(() => setLoading(false));
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchMovements(); }, []);
   const [revertTarget, setRevertTarget] = useState<Movement | null>(null);
   const [reverting, setReverting] = useState(false);
   const [revertError, setRevertError] = useState('');
@@ -64,7 +78,8 @@ export default function MovementsClient({
   const filtered = useMemo(() => {
     return movements.filter(m => {
       const matchType = !typeFilter || m.type === typeFilter;
-      const matchDate = !dateFilter || new Date(m.createdAt).toISOString().startsWith(dateFilter);
+      const matchDate = !dateFilter ||
+        new Date(m.createdAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === dateFilter;
       return matchType && matchDate;
     });
   }, [movements, typeFilter, dateFilter]);
@@ -88,7 +103,7 @@ export default function MovementsClient({
       if (!res.ok) { setRevertError(data.error ?? 'Error al revertir'); return; }
       setLocalReverted(prev => new Set([...prev, revertTarget.id]));
       setRevertTarget(null);
-      router.refresh();
+      fetchMovements();
     } catch {
       setRevertError('Error de conexión');
     } finally {
@@ -100,7 +115,9 @@ export default function MovementsClient({
     <div className="p-4 lg:p-6">
       <div className="mb-6">
         <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Movimientos</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Últimos {movements.length} registros</p>
+        <p className="text-sm text-gray-500 mt-0.5">
+          {loading ? 'Cargando…' : `Últimos ${movements.length} registros`}
+        </p>
       </div>
 
       {/* Filters */}
@@ -154,7 +171,11 @@ export default function MovementsClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={colSpan} className="px-4 py-12 text-center text-gray-400">Cargando movimientos…</td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="px-4 py-12 text-center text-gray-400">No hay movimientos</td>
                 </tr>
