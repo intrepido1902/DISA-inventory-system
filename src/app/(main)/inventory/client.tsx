@@ -213,11 +213,17 @@ export default function InventoryClient({
   // ── Derived ──────────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
+    if (rolls.length > 0) {
+      console.log('[INV-DEBUG] rolls[0]:', JSON.stringify(rolls[0]));
+      console.log('[INV-DEBUG] rolls[0].product:', JSON.stringify(rolls[0].product));
+      console.log('[INV-DEBUG] rolls[0].product.code:', rolls[0].product?.code);
+    }
     return rolls.filter(r => {
       const matchCategory = !categoryFilter || r.category.id === parseInt(categoryFilter);
       if (!search || !search.trim()) return matchCategory;
       const s = search.toLowerCase().trim();
       const productCode = r.product?.code?.toLowerCase() ?? '';
+      console.log('[INV-DEBUG] filter check:', { s, productCode, match: productCode.includes(s) });
       return productCode.includes(s) && matchCategory;
     });
   }, [rolls, search, categoryFilter]);
