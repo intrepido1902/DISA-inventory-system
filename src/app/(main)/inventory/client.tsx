@@ -216,21 +216,9 @@ export default function InventoryClient({
     return rolls.filter(r => {
       const matchCategory = !categoryFilter || r.category.id === parseInt(categoryFilter);
       if (!search || !search.trim()) return matchCategory;
-
       const s = search.toLowerCase().trim();
       const productCode = r.product?.code?.toLowerCase() ?? '';
-
-      // 1. Buscar por consecutivo (disaNumber)
-      const matchConsecutivo = (r.disaNumber ?? '').toString().includes(s);
-
-      // 2. Buscar en el code completo del producto
-      const matchReferencia = productCode.includes(s);
-
-      // 3. Buscar en la referencia base (sin sufijos de color y ancho)
-      const refBase = productCode.replace(/-\d+-\d+$/, '').replace(/-\d+$/, '');
-      const matchRefBase = refBase.includes(s);
-
-      return (matchConsecutivo || matchReferencia || matchRefBase) && matchCategory;
+      return productCode.includes(s) && matchCategory;
     });
   }, [rolls, search, categoryFilter]);
 
@@ -670,7 +658,7 @@ export default function InventoryClient({
         <div className="relative flex-1 min-w-48">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
           <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por referencia o consecutivo..."
+            placeholder="Buscar por referencia..."
             className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
         </div>
         <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
