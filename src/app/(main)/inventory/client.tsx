@@ -215,35 +215,39 @@ export default function InventoryClient({
   const filtered = useMemo(() => {
     return rolls.filter(r => {
       const matchCategory = !categoryFilter || r.category.id === parseInt(categoryFilter);
-      if (!search) return matchCategory;
+      if (!search || !search.trim()) return matchCategory;
 
       const s = search.toLowerCase().trim();
-      let matchSearch: boolean;
-      if (/^\d+$/.test(s)) {
-        // All-digit → buscar por consecutivo (disaNumber)
-        matchSearch = (r.disaNumber ?? '').includes(s);
-      } else {
-        // Alfanumérico → buscar por referencia base (sin sufijos de color/ancho)
-        const refBase = r.product.code.replace(/(-\d+){1,2}$/, '').toLowerCase();
-        matchSearch = refBase.includes(s) || r.product.code.toLowerCase().includes(s);
-      }
-      return matchSearch && matchCategory;
+      const productCode = r.product?.code?.toLowerCase() ?? '';
+
+      // 1. Buscar por consecutivo (disaNumber)
+      const matchConsecutivo = (r.disaNumber ?? '').toString().includes(s);
+
+      // 2. Buscar en el code completo del producto
+      const matchReferencia = productCode.includes(s);
+
+      // 3. Buscar en la referencia base (sin sufijos de color y ancho)
+      const refBase = productCode.replace(/-\d+-\d+$/, '').replace(/-\d+$/, '');
+      const matchRefBase = refBase.includes(s);
+
+      return (matchConsecutivo || matchReferencia || matchRefBase) && matchCategory;
     });
   }, [rolls, search, categoryFilter]);
 
   const activeFilterCount = [search, categoryFilter].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
 
-  // Resumen por referencia cuando el usuario busca por texto alfanumérico
+  // Resumen de rollos cuando hay búsqueda activa
   const refSummary = useMemo(() => {
-    const s = search.trim();
-    if (!s || /^\d+$/.test(s) || filtered.length === 0) return null;
-    const refs = new Set(filtered.map(r => r.product.code.replace(/(-\d+){1,2}$/, '')));
-    if (refs.size !== 1) return null;
-    const ref = [...refs][0];
+    if (!search.trim() || filtered.length === 0) return null;
     const active = filtered.filter(r => r.status !== 'DEPLETED');
     const totalMeters = active.reduce((sum, r) => sum + r.currentMeters, 0);
-    return { ref, count: active.length, totalMeters };
+    const refs = new Set(active.map(r => r.product.code.replace(/(-\d+){1,2}$/, '')));
+    if (refs.size === 1) {
+      return { single: true, ref: [...refs][0], count: active.length, totalMeters };
+    }
+    // Múltiples referencias mezcladas
+    return { single: false, ref: null, count: active.length, totalMeters };
   }, [filtered, search]);
 
   const filteredWizardRolls = useMemo(() => {
@@ -683,16 +687,28 @@ export default function InventoryClient({
         )}
       </div>
 
-      {/* ── Resumen de referencia ── */}
+      {/* ── Resumen de búsqueda ── */}
       {refSummary && (
         <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 flex flex-wrap gap-x-3 items-center text-sm">
-          <span className="font-semibold text-blue-900">Ref. {refSummary.ref}</span>
-          <span className="text-blue-400">·</span>
-          <span className="text-blue-700">{refSummary.count} rollo{refSummary.count !== 1 ? 's' : ''} activo{refSummary.count !== 1 ? 's' : ''}</span>
-          <span className="text-blue-400">·</span>
-          <span className="font-semibold text-blue-900">
-            {Number(refSummary.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles
-          </span>
+          {refSummary.single ? (
+            <>
+              <span className="font-semibold text-blue-900">Ref. {refSummary.ref}</span>
+              <span className="text-blue-400">·</span>
+              <span className="text-blue-700">{refSummary.count} rollo{refSummary.count !== 1 ? 's' : ''} activo{refSummary.count !== 1 ? 's' : ''}</span>
+              <span className="text-blue-400">·</span>
+              <span className="font-semibold text-blue-900">
+                {Number(refSummary.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-blue-700">{refSummary.count} rollo{refSummary.count !== 1 ? 's' : ''} encontrado{refSummary.count !== 1 ? 's' : ''}</span>
+              <span className="text-blue-400">·</span>
+              <span className="font-semibold text-blue-900">
+                {Number(refSummary.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles en total
+              </span>
+            </>
+          )}
         </div>
       )}
 
