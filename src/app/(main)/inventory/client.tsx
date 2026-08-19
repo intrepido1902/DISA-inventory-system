@@ -234,6 +234,18 @@ export default function InventoryClient({
   const activeFilterCount = [search, categoryFilter].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
 
+  // Resumen por referencia cuando el usuario busca por texto alfanumérico
+  const refSummary = useMemo(() => {
+    const s = search.trim();
+    if (!s || /^\d+$/.test(s) || filtered.length === 0) return null;
+    const refs = new Set(filtered.map(r => r.product.code.replace(/(-\d+){1,2}$/, '')));
+    if (refs.size !== 1) return null;
+    const ref = [...refs][0];
+    const active = filtered.filter(r => r.status !== 'DEPLETED');
+    const totalMeters = active.reduce((sum, r) => sum + r.currentMeters, 0);
+    return { ref, count: active.length, totalMeters };
+  }, [filtered, search]);
+
   const filteredWizardRolls = useMemo(() => {
     if (!wizardSearch.trim()) return wizardRolls;
     const q = wizardSearch.toLowerCase().trim();
@@ -670,6 +682,19 @@ export default function InventoryClient({
           </button>
         )}
       </div>
+
+      {/* ── Resumen de referencia ── */}
+      {refSummary && (
+        <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 flex flex-wrap gap-x-3 items-center text-sm">
+          <span className="font-semibold text-blue-900">Ref. {refSummary.ref}</span>
+          <span className="text-blue-400">·</span>
+          <span className="text-blue-700">{refSummary.count} rollo{refSummary.count !== 1 ? 's' : ''} activo{refSummary.count !== 1 ? 's' : ''}</span>
+          <span className="text-blue-400">·</span>
+          <span className="font-semibold text-blue-900">
+            {Number(refSummary.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles
+          </span>
+        </div>
+      )}
 
       <p className="text-xs text-gray-400 mb-2 flex items-center gap-2">
         {isFetching
