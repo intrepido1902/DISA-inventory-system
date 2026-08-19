@@ -6,7 +6,6 @@ import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Package,
-  ArrowRightLeft,
   BookOpen,
   Users,
   UserCog,
@@ -33,7 +32,6 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/dashboard',        icon: LayoutDashboard, label: 'Dashboard',        roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
   { href: '/inventory',        icon: Package,          label: 'Inventario',       roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
-  { href: '/movements',        icon: ArrowRightLeft,   label: 'Movimientos',      roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
   { href: '/catalog',          icon: BookOpen,          label: 'Catálogo',         roles: ['OWNER', 'ADMIN'] },
   { href: '/clients',          icon: Users,             label: 'Clientes',         roles: ['OWNER', 'ADMIN'] },
   { href: '/pending-defects',  icon: AlertTriangle,     label: 'Bajas pendientes', roles: ['OWNER'] },
