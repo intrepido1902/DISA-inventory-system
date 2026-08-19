@@ -152,14 +152,8 @@ export async function GET(request: NextRequest) {
       query = query.or(orParts.join(','));
     }
 
-    // Order: remnants tab sorts by meters ASC; default sorts by status + updatedAt
-    if (isRemnantParam === 'true') {
-      query = query.order('currentMeters', { ascending: true });
-    } else {
-      query = query
-        .order('status', { ascending: true })
-        .order('updatedAt', { ascending: false });
-    }
+    // Order by consecutivo (id) ascending
+    query = query.order('id', { ascending: true });
 
     const { data, count, error } = await query.range(from, to);
     if (error) throw error;
