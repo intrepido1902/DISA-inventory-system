@@ -45,9 +45,23 @@ export async function GET() {
     for (const roll of activeRolls) {
       productMeters.set(roll.productId, (productMeters.get(roll.productId) ?? 0) + (roll.currentMeters as number));
     }
-    const lowStock = allProducts
-      .filter(p => (productMeters.get(p.id) ?? 0) < 100)
-      .map(p => ({ name: p.name, code: p.code, totalMeters: productMeters.get(p.id) ?? 0 }))
+
+    // Strip trailing numeric color/width segments to group by base reference
+    function baseRef(code: string): string {
+      return code.replace(/(-\d+){1,2}$/, '') || code;
+    }
+    const refMeters = new Map<string, { name: string; totalMeters: number }>();
+    for (const p of allProducts) {
+      const ref = baseRef((p as any).code);
+      const m = productMeters.get((p as any).id) ?? 0;
+      const existing = refMeters.get(ref);
+      refMeters.set(ref, existing
+        ? { name: existing.name, totalMeters: existing.totalMeters + m }
+        : { name: (p as any).name, totalMeters: m });
+    }
+    const lowStock = Array.from(refMeters.entries())
+      .filter(([, { totalMeters }]) => totalMeters < 100)
+      .map(([ref, { name, totalMeters }]) => ({ name, code: ref, totalMeters }))
       .sort((a, b) => a.totalMeters - b.totalMeters)
       .slice(0, 5);
 

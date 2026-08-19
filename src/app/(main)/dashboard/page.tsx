@@ -12,6 +12,12 @@ function formatMeters(n: number) {
   return `${Number(n).toLocaleString('es-CO')} m`;
 }
 
+// Strips trailing numeric color/width segments so all variants of a reference collapse.
+// "2203-2-300" → "2203"   "AS2203-1-300" → "AS2203"   "LSFH2306-3-280" → "LSFH2306"
+function baseRef(code: string): string {
+  return code.replace(/(-\d+){1,2}$/, '') || code;
+}
+
 async function getDashboardData(role: string) {
   const isOwner = canSeeFinancials(role as Role);
   const isManager = role === 'OWNER' || role === 'ADMIN';
@@ -65,30 +71,35 @@ async function getDashboardData(role: string) {
   const todayMov = (todayMovRes.data ?? []) as any[];
   const monthMov = ((monthMovRes as any).data ?? []) as any[];
 
-  // Rolls per product (active only)
+  // Count active rolls per individual product (productId → count)
   const activeRollsPerProduct = new Map<number, number>();
   for (const r of activeProductIds) {
     activeRollsPerProduct.set(r.productId, (activeRollsPerProduct.get(r.productId) ?? 0) + 1);
   }
 
-  // Low stock: products with fewer than 5 active rolls, sorted critical-first
-  const lowStockProducts = allProducts
-    .filter((p: any) => (activeRollsPerProduct.get(p.id) ?? 0) < 5)
-    .map((p: any) => ({
-      name: p.name,
-      code: p.code,
-      activeRolls: activeRollsPerProduct.get(p.id) ?? 0,
-    }))
-    .sort((a: any, b: any) => a.activeRolls - b.activeRolls);
+  // Aggregate roll counts by base reference: "2203-2-300" and "2203-3-300" both map to "2203"
+  const activeRollsPerRef = new Map<string, number>();
+  const refNameMap = new Map<string, string>(); // ref → first seen product name
+  for (const p of allProducts) {
+    const ref = baseRef((p as any).code);
+    const count = activeRollsPerProduct.get((p as any).id) ?? 0;
+    activeRollsPerRef.set(ref, (activeRollsPerRef.get(ref) ?? 0) + count);
+    if (!refNameMap.has(ref)) refNameMap.set(ref, (p as any).name);
+  }
 
-  // Most stocked product
+  // Low stock: base references with fewer than 5 active rolls total, sorted critical-first
+  const lowStockProducts = Array.from(activeRollsPerRef.entries())
+    .filter(([, count]) => count < 5)
+    .map(([ref, count]) => ({ name: refNameMap.get(ref) ?? ref, code: ref, activeRolls: count }))
+    .sort((a, b) => a.activeRolls - b.activeRolls);
+
+  // Most stocked base reference
   let mostStockedProduct: { name: string; code: string; activeRolls: number } | null = null;
   let maxRolls = 0;
-  for (const p of allProducts) {
-    const count = activeRollsPerProduct.get(p.id) ?? 0;
+  for (const [ref, count] of activeRollsPerRef) {
     if (count > maxRolls) {
       maxRolls = count;
-      mostStockedProduct = { name: p.name, code: p.code, activeRolls: count };
+      mostStockedProduct = { name: refNameMap.get(ref) ?? ref, code: ref, activeRolls: count };
     }
   }
 
@@ -105,12 +116,20 @@ async function getDashboardData(role: string) {
     if (productId) productMetersLastMonth.set(productId, (productMetersLastMonth.get(productId) ?? 0) + meters);
   }
 
-  let maxMeters = 0;
+  // Group last-month meters by base reference, then find the top ref
+  const refMetersLastMonth = new Map<string, number>();
   for (const [pid, meters] of productMetersLastMonth) {
+    const p = allProducts.find((x: any) => x.id === pid);
+    if (!p) continue;
+    const ref = baseRef((p as any).code);
+    refMetersLastMonth.set(ref, (refMetersLastMonth.get(ref) ?? 0) + meters);
+  }
+
+  let maxMeters = 0;
+  for (const [ref, meters] of refMetersLastMonth) {
     if (meters > maxMeters) {
       maxMeters = meters;
-      const p = allProducts.find((x: any) => x.id === pid);
-      topProductLastMonth = p ? { name: p.name, code: p.code, meters } : null;
+      topProductLastMonth = { name: refNameMap.get(ref) ?? ref, code: ref, meters };
     }
   }
 
@@ -199,12 +218,12 @@ export default async function DashboardPage() {
             {/* Cambio 3B: show reference code first, then roll count below */}
             <StatCard
               label="Mayor stock"
-              value={data.mostStockedProduct ? data.mostStockedProduct.code.split('-')[0] : '—'}
+              value={data.mostStockedProduct ? data.mostStockedProduct.code : '—'}
               sub={data.mostStockedProduct ? `${data.mostStockedProduct.activeRolls} rollos activos` : 'Sin datos'}
             />
             <StatCard
               label="Más vendido (30 días)"
-              value={data.topProductLastMonth ? data.topProductLastMonth.code.split('-')[0] : '—'}
+              value={data.topProductLastMonth ? data.topProductLastMonth.code : '—'}
               sub={data.topProductLastMonth
                 ? `${data.topProductLastMonth.name} · ${formatMeters(data.topProductLastMonth.meters)}`
                 : 'Sin ventas'}
