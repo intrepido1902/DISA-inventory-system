@@ -167,9 +167,6 @@ export default function InventoryClient({
 
   const [search, setSearch] = useState(initialSearch);
   const [categoryFilter, setCategoryFilter] = useState(initialCategory);
-  const [statusFilter, setStatusFilter] = useState(initialStatus);
-  const [colorFilter, setColorFilter] = useState(initialColor);
-  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
 
   // ── Exit modal state ─────────────────────────────────────────────────────
   const [showExit, setShowExit] = useState(openExitModal);
@@ -215,29 +212,26 @@ export default function InventoryClient({
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  const availableColors = useMemo(() => {
-    const set = new Set<string>();
-    rolls.forEach(r => { if (r.product.color) set.add(r.product.color); });
-    return [...set].sort();
-  }, [rolls]);
-
   const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim();
     return rolls.filter(r => {
-      const matchSearch = !q || [
-        r.disaNumber ?? '',
-        r.rollNumber,
-        r.product.code,
-        r.product.name,
-      ].some(s => s.toLowerCase().includes(q));
       const matchCategory = !categoryFilter || r.category.id === parseInt(categoryFilter);
-      const matchColor = !colorFilter || r.product.color === colorFilter;
-      const matchStatus = !statusFilter || r.status === statusFilter;
-      return matchSearch && matchCategory && matchColor && matchStatus;
-    });
-  }, [rolls, search, categoryFilter, statusFilter, colorFilter]);
+      if (!search) return matchCategory;
 
-  const activeFilterCount = [search, categoryFilter, statusFilter, colorFilter].filter(Boolean).length;
+      const s = search.toLowerCase().trim();
+      let matchSearch: boolean;
+      if (/^\d+$/.test(s)) {
+        // All-digit → buscar por consecutivo (disaNumber)
+        matchSearch = (r.disaNumber ?? '').includes(s);
+      } else {
+        // Alfanumérico → buscar por referencia base (sin sufijos de color/ancho)
+        const refBase = r.product.code.replace(/(-\d+){1,2}$/, '').toLowerCase();
+        matchSearch = refBase.includes(s) || r.product.code.toLowerCase().includes(s);
+      }
+      return matchSearch && matchCategory;
+    });
+  }, [rolls, search, categoryFilter]);
+
+  const activeFilterCount = [search, categoryFilter].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
 
   const filteredWizardRolls = useMemo(() => {
@@ -282,8 +276,6 @@ export default function InventoryClient({
     const params = new URLSearchParams({ page: String(serverPage), limit: String(SERVER_LIMIT) });
     if (tab === 'remnants') params.set('isRemnant', 'true');
     if (categoryFilter) params.set('category', categoryFilter);
-    if (statusFilter) params.set('status', statusFilter);
-    if (colorFilter) params.set('color', colorFilter);
     setIsFetching(true);
     fetch(`/api/inventory?${params}`, { signal: ctrl.signal })
       .then(r => r.json())
@@ -297,14 +289,14 @@ export default function InventoryClient({
       .catch(e => { if (e.name !== 'AbortError') console.error('inventory fetch error:', e); })
       .finally(() => setIsFetching(false));
     return () => ctrl.abort();
-  }, [serverPage, tab, categoryFilter, statusFilter, colorFilter]);
+  }, [serverPage, tab, categoryFilter]);
 
   useEffect(() => {
     const t = setTimeout(() => {
-      updateUrl({ q: search, cat: categoryFilter, status: statusFilter, color: colorFilter, p: serverPage > 1 ? String(serverPage) : '' });
+      updateUrl({ q: search, cat: categoryFilter, p: serverPage > 1 ? String(serverPage) : '' });
     }, 350);
     return () => clearTimeout(t);
-  }, [search, categoryFilter, statusFilter, colorFilter, serverPage]);
+  }, [search, categoryFilter, serverPage]);
 
   // Fetch prices for all selected rolls when client or selection changes
   useEffect(() => {
@@ -377,7 +369,7 @@ export default function InventoryClient({
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   function clearFilters() {
-    setSearch(''); setCategoryFilter(''); setStatusFilter(''); setColorFilter('');
+    setSearch(''); setCategoryFilter('');
     setServerPage(1);
     updateUrl({});
   }
@@ -657,31 +649,19 @@ export default function InventoryClient({
         ))}
       </div>
 
-      {/* ── Filter bar — Desktop ── */}
-      <div className="hidden md:flex flex-wrap gap-2 mb-3 items-center">
+      {/* ── Filter bar ── */}
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
         <div className="relative flex-1 min-w-48">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
           <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar..."
+            placeholder="Buscar por referencia o consecutivo..."
             className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
         </div>
         <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
-          <option value="">Todas</option>
+          <option value="">Todos</option>
           <option value="1">Velo</option>
           <option value="2">Blackout</option>
-        </select>
-        <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
-          className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
-          <option value="">Color</option>
-          {availableColors.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setServerPage(1); }}
-          className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
-          <option value="">Estado</option>
-          <option value="ACTIVE">Activo</option>
-          <option value="REMNANT">Remanente</option>
-          <option value="DEPLETED">Agotado</option>
         </select>
         {activeFilterCount > 0 && (
           <button onClick={clearFilters}
@@ -690,50 +670,6 @@ export default function InventoryClient({
           </button>
         )}
       </div>
-
-      {/* ── Filter bar — Mobile ── */}
-      <div className="flex md:hidden gap-2 mb-3">
-        <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..."
-            className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
-        </div>
-        <button onClick={() => setShowFiltersPanel(v => !v)}
-          className={`flex items-center gap-1.5 px-3 py-2 border rounded text-sm transition-colors ${activeFilterCount > 0 ? 'border-gray-900 bg-gray-900 text-white' : 'border-[#E5E5E5] bg-white text-gray-700'}`}>
-          Filtros
-          {activeFilterCount > 0 && <span className="bg-white text-gray-900 text-xs font-bold w-4 h-4 flex items-center justify-center rounded-full">{activeFilterCount}</span>}
-          <span className="text-xs">{showFiltersPanel ? '▲' : '▼'}</span>
-        </button>
-      </div>
-
-      {showFiltersPanel && (
-        <div className="md:hidden bg-white border border-[#E5E5E5] rounded-lg p-4 mb-3 space-y-3">
-          <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
-            className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
-            <option value="">Todas las categorías</option>
-            <option value="1">Velo</option>
-            <option value="2">Blackout</option>
-          </select>
-          <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
-            className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
-            <option value="">Todos los colores</option>
-            {availableColors.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setServerPage(1); }}
-            className="w-full border border-[#E5E5E5] bg-white rounded px-3 py-2.5 text-sm focus:outline-none">
-            <option value="">Todos los estados</option>
-            <option value="ACTIVE">Activo</option>
-            <option value="REMNANT">Remanente</option>
-            <option value="DEPLETED">Agotado</option>
-          </select>
-          {activeFilterCount > 0 && (
-            <button onClick={() => { clearFilters(); setShowFiltersPanel(false); }}
-              className="w-full text-sm text-gray-600 border border-[#E5E5E5] rounded px-3 py-2.5 hover:bg-gray-50">
-              ✕ Limpiar filtros
-            </button>
-          )}
-        </div>
-      )}
 
       <p className="text-xs text-gray-400 mb-2 flex items-center gap-2">
         {isFetching
