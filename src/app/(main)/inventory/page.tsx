@@ -46,10 +46,9 @@ async function getInventoryData(isRemnantTab: boolean) {
   let rollQuery = db.from('Roll').select(ROLL_SELECT, { count: 'exact' });
 
   if (isRemnantTab) {
-    rollQuery = rollQuery.eq('status', 'REMNANT').order('currentMeters', { ascending: true });
-  } else {
-    rollQuery = rollQuery.order('status', { ascending: true }).order('updatedAt', { ascending: false });
+    rollQuery = rollQuery.eq('status', 'REMNANT');
   }
+  rollQuery = rollQuery.order('id', { ascending: true });
 
   const [rollsRes, clientsRes, productsRes, lotsRes, remCountRes, activeCountRes] = await Promise.all([
     rollQuery.range(0, 99),

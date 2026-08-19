@@ -2,7 +2,6 @@ import { getSession } from '@/lib/session';
 import { canSeeFinancials, type Role } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { formatColombianDate } from '@/lib/dateUtils';
-import LowStockPanel from './LowStockPanel';
 import RejectedDefectsPanel from './RejectedDefectsPanel';
 
 function formatCOP(n: number) {
@@ -87,12 +86,6 @@ async function getDashboardData(role: string) {
     if (!refNameMap.has(ref)) refNameMap.set(ref, (p as any).name);
   }
 
-  // Low stock: base references with fewer than 5 active rolls total, sorted critical-first
-  const lowStockProducts = Array.from(activeRollsPerRef.entries())
-    .filter(([, count]) => count < 5)
-    .map(([ref, count]) => ({ name: refNameMap.get(ref) ?? ref, code: ref, activeRolls: count }))
-    .sort((a, b) => a.activeRolls - b.activeRolls);
-
   // Most stocked base reference
   let mostStockedProduct: { name: string; code: string; activeRolls: number } | null = null;
   let maxRolls = 0;
@@ -159,7 +152,7 @@ async function getDashboardData(role: string) {
 
   return {
     totalActiveRolls, totalRemnantRolls,
-    lowStockProducts, mostStockedProduct,
+    mostStockedProduct,
     topProductLastMonth, totalMetersThisMonth,
     todayMovements, dayTotal, isOwner, isManager,
     ventasMes, ventasTotales,
@@ -198,24 +191,12 @@ export default async function DashboardPage() {
       {/* Rejection notification — for ADMIN/WAREHOUSE reporters (Client Component) */}
       {session!.role !== 'OWNER' && <RejectedDefectsPanel />}
 
-      {/* Low stock alert — expandable (Client Component) */}
-      {data.lowStockProducts.length > 0 && (
-        <LowStockPanel products={data.lowStockProducts} />
-      )}
-
       {/* Stats grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-6 lg:mb-8">
         <StatCard label="Rollos activos" value={String(data.totalActiveRolls)} sub="en bodega" />
         <StatCard label="Remanentes" value={String(data.totalRemnantRolls)} sub="rollos con corte" />
         {data.isManager && (
           <>
-            <StatCard
-              label="Ref. con stock bajo"
-              value={String(data.lowStockProducts.length)}
-              sub="< 5 rollos activos"
-              warn={data.lowStockProducts.length > 0}
-            />
-            {/* Cambio 3B: show reference code first, then roll count below */}
             <StatCard
               label="Mayor stock"
               value={data.mostStockedProduct ? data.mostStockedProduct.code : '—'}
