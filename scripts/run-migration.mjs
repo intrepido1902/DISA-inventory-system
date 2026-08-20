@@ -1,7 +1,11 @@
 import pg from 'pg';
 const { Client } = pg;
 
-const DATABASE_URL = 'postgresql://postgres.jvljcoickaxgtukhcvxq:disainventory2026*@aws-1-us-east-2.pooler.supabase.com:6543/postgres';
+const DATABASE_URL = process.env.DATABASE_URL ?? '';
+if (!DATABASE_URL) {
+  console.error('❌ Falta variable de entorno: DATABASE_URL');
+  process.exit(1);
+}
 
 const client = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
