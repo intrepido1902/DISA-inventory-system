@@ -94,18 +94,22 @@ export async function GET(request: NextRequest) {
       if (productIdFilter.length === 0) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
     }
 
-    // ── Step 2: resolve product IDs matching text search ─────────────────────
-    let searchProductIds: number[] | null = null;
+    // ── Step 2: filter product IDs by reference code search ──────────────────
     if (search) {
-      const orParts = [
-        `name.ilike.%${search}%`,
-        `code.ilike.%${search}%`,
-        `color.ilike.%${search}%`,
-      ];
-      const sNum = parseFloat(search);
-      if (!isNaN(sNum)) orParts.push(`width.eq.${sNum}`);
-      const { data: pRows } = await db.from('Product').select('id').or(orParts.join(','));
-      searchProductIds = (pRows ?? []).map((p: any) => p.id as number);
+      const { data: pRows } = await db.from('Product').select('id').ilike('code', `%${search}%`);
+      const searchIds = (pRows ?? []).map((p: any) => p.id as number);
+      if (searchIds.length === 0) {
+        return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
+      }
+      if (productIdFilter !== null) {
+        const searchSet = new Set(searchIds);
+        productIdFilter = productIdFilter.filter(id => searchSet.has(id));
+        if (productIdFilter.length === 0) {
+          return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
+        }
+      } else {
+        productIdFilter = searchIds;
+      }
     }
 
     // ── Step 3: build main Roll query ─────────────────────────────────────────
@@ -136,21 +140,6 @@ export async function GET(request: NextRequest) {
 
     // Location
     if (locationFilter) query = query.ilike('location', `%${locationFilter}%`);
-
-    // Text search: OR across roll fields + matching product IDs
-    // (the AND with productIdFilter above still constrains product results correctly)
-    if (search) {
-      const orParts = [
-        `disaNumber.ilike.%${search}%`,
-        `rollNumber.ilike.%${search}%`,
-      ];
-      const sNum = parseFloat(search);
-      if (!isNaN(sNum)) orParts.push(`currentMeters.eq.${sNum}`);
-      if (searchProductIds !== null && searchProductIds.length > 0) {
-        orParts.push(`productId.in.(${searchProductIds.join(',')})`);
-      }
-      query = query.or(orParts.join(','));
-    }
 
     // Order by consecutivo (id) ascending
     query = query.order('id', { ascending: true });

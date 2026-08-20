@@ -42,11 +42,26 @@ function mapRoll(r: any) {
   };
 }
 
-async function getInventoryData(isRemnantTab: boolean) {
+async function getInventoryData(isRemnantTab: boolean, search = '') {
+  // Pre-compute product IDs matching search (reference code filter)
+  let searchProductIds: number[] | null = null;
+  if (search) {
+    const { data: pRows } = await db.from('Product').select('id').ilike('code', `%${search}%`);
+    searchProductIds = (pRows ?? []).map((p: any) => p.id as number);
+  }
+
   let rollQuery = db.from('Roll').select(ROLL_SELECT, { count: 'exact' });
 
   if (isRemnantTab) {
     rollQuery = rollQuery.eq('status', 'REMNANT');
+  }
+  if (searchProductIds !== null) {
+    if (searchProductIds.length === 0) {
+      // No products match the search — force empty rolls result
+      rollQuery = rollQuery.lt('id', 0);
+    } else {
+      rollQuery = rollQuery.in('productId', searchProductIds);
+    }
   }
   rollQuery = rollQuery.order('id', { ascending: true });
 
@@ -107,7 +122,7 @@ export default async function InventoryPage({
   const session = await getSession();
   const sp = await searchParams;
   const isRemnantTab = sp.tab === 'remnants';
-  const data = await getInventoryData(isRemnantTab);
+  const data = await getInventoryData(isRemnantTab, sp.q ?? '');
 
   return (
     <InventoryClient

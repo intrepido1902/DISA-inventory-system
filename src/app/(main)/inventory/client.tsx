@@ -167,6 +167,7 @@ export default function InventoryClient({
 
   const [search, setSearch] = useState(initialSearch);
   const [categoryFilter, setCategoryFilter] = useState(initialCategory);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
 
   // ── Exit modal state ─────────────────────────────────────────────────────
   const [showExit, setShowExit] = useState(openExitModal);
@@ -213,36 +214,26 @@ export default function InventoryClient({
   // ── Derived ──────────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    if (rolls.length > 0) {
-      console.log('[INV-DEBUG] rolls[0]:', JSON.stringify(rolls[0]));
-      console.log('[INV-DEBUG] rolls[0].product:', JSON.stringify(rolls[0].product));
-      console.log('[INV-DEBUG] rolls[0].product.code:', rolls[0].product?.code);
-    }
-    return rolls.filter(r => {
-      const matchCategory = !categoryFilter || r.category.id === parseInt(categoryFilter);
-      if (!search || !search.trim()) return matchCategory;
-      const s = search.toLowerCase().trim();
-      const productCode = r.product?.code?.toLowerCase() ?? '';
-      console.log('[INV-DEBUG] filter check:', { s, productCode, match: productCode.includes(s) });
-      return productCode.includes(s) && matchCategory;
-    });
-  }, [rolls, search, categoryFilter]);
+    // Search is applied server-side; only guard stale category data during loading
+    return categoryFilter
+      ? rolls.filter(r => r.category.id === parseInt(categoryFilter))
+      : rolls;
+  }, [rolls, categoryFilter]);
 
   const activeFilterCount = [search, categoryFilter].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
 
-  // Resumen de rollos cuando hay búsqueda activa
+  // Resumen de rollos cuando hay búsqueda activa (usa debouncedSearch para evitar datos rancios)
   const refSummary = useMemo(() => {
-    if (!search.trim() || filtered.length === 0) return null;
+    if (!debouncedSearch.trim() || filtered.length === 0) return null;
     const active = filtered.filter(r => r.status !== 'DEPLETED');
     const totalMeters = active.reduce((sum, r) => sum + r.currentMeters, 0);
     const refs = new Set(active.map(r => r.product.code.replace(/(-\d+){1,2}$/, '')));
     if (refs.size === 1) {
       return { single: true, ref: [...refs][0], count: active.length, totalMeters };
     }
-    // Múltiples referencias mezcladas
     return { single: false, ref: null, count: active.length, totalMeters };
-  }, [filtered, search]);
+  }, [filtered, debouncedSearch]);
 
   const filteredWizardRolls = useMemo(() => {
     if (!wizardSearch.trim()) return wizardRolls;
@@ -277,15 +268,27 @@ export default function InventoryClient({
 
   // ── Effects ──────────────────────────────────────────────────────────────
 
+  // Debounce search input: actualiza debouncedSearch 300ms después del último keystroke
+  // y resetea la paginación para que los nuevos resultados empiecen desde la página 1
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setServerPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
-      if (serverPage === 1 && tab === 'all') return;
+      // Si hay búsqueda inicial (desde URL), forzar fetch aunque sea page 1
+      if (serverPage === 1 && tab === 'all' && !debouncedSearch) return;
     }
     const ctrl = new AbortController();
     const params = new URLSearchParams({ page: String(serverPage), limit: String(SERVER_LIMIT) });
     if (tab === 'remnants') params.set('isRemnant', 'true');
     if (categoryFilter) params.set('category', categoryFilter);
+    if (debouncedSearch) params.set('search', debouncedSearch);
     setIsFetching(true);
     fetch(`/api/inventory?${params}`, { signal: ctrl.signal })
       .then(r => r.json())
@@ -299,7 +302,7 @@ export default function InventoryClient({
       .catch(e => { if (e.name !== 'AbortError') console.error('inventory fetch error:', e); })
       .finally(() => setIsFetching(false));
     return () => ctrl.abort();
-  }, [serverPage, tab, categoryFilter]);
+  }, [serverPage, tab, categoryFilter, debouncedSearch]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -380,6 +383,7 @@ export default function InventoryClient({
 
   function clearFilters() {
     setSearch(''); setCategoryFilter('');
+    setDebouncedSearch(''); // limpiar inmediatamente sin esperar el debounce
     setServerPage(1);
     updateUrl({});
   }
