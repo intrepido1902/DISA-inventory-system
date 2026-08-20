@@ -92,7 +92,8 @@ function baseRef(code: string): string {
 function updateUrl(filters: Record<string, string>) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
-  ['q', 'cat', 'status', 'color', 'p'].forEach(k => url.searchParams.delete(k));
+  ['q', 'cat', 'family', 'status', 'color', 'width', 'rollNum', 'minM', 'maxM', 'depleted', 'p']
+    .forEach(k => url.searchParams.delete(k));
   Object.entries(filters).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
   window.history.replaceState({}, '', url.toString());
 }
@@ -132,14 +133,16 @@ interface SaleResult {
 }
 
 export default function InventoryClient({
-  initialRolls, initialTotal, initialTotalPages, initialRemnantCount, initialActiveCount,
+  initialRolls, initialTotal, initialTotalMeters = 0, initialTotalPages, initialRemnantCount, initialActiveCount,
   clients: initialClients, products, lots, userRole, userName,
   initialTab = 'all', openExitModal = false,
-  initialSearch = '', initialCategory = '', initialStatus = '',
-  initialColor = '', initialMinMeters = '', initialMaxMeters = '', initialLocation = '',
+  initialSearch = '', initialFamily = '', initialStatus = '',
+  initialColor = '', initialWidth = '', initialMinMeters = '', initialMaxMeters = '',
+  initialRollNumber = '', initialShowDepleted = false,
 }: {
   initialRolls: Roll[];
   initialTotal: number;
+  initialTotalMeters?: number;
   initialTotalPages: number;
   initialRemnantCount: number;
   initialActiveCount: number;
@@ -151,12 +154,14 @@ export default function InventoryClient({
   initialTab?: 'all' | 'remnants';
   openExitModal?: boolean;
   initialSearch?: string;
-  initialCategory?: string;
+  initialFamily?: string;
   initialStatus?: string;
   initialColor?: string;
+  initialWidth?: string;
   initialMinMeters?: string;
   initialMaxMeters?: string;
-  initialLocation?: string;
+  initialRollNumber?: string;
+  initialShowDepleted?: boolean;
 }) {
   const router = useRouter();
 
@@ -170,9 +175,25 @@ export default function InventoryClient({
   const [serverTotalPages, setServerTotalPages] = useState(initialTotalPages);
   const [isFetching, setIsFetching] = useState(false);
 
+  // ── Filter state ─────────────────────────────────────────────────────────
   const [search, setSearch] = useState(initialSearch);
-  const [categoryFilter, setCategoryFilter] = useState(initialCategory);
+  const [familyFilter, setFamilyFilter] = useState(initialFamily);
+  const [colorFilter, setColorFilter] = useState(initialColor);
+  const [widthFilter, setWidthFilter] = useState(initialWidth);
+  const [rollNumberFilter, setRollNumberFilter] = useState(initialRollNumber);
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
+  const [minMeters, setMinMeters] = useState(initialMinMeters);
+  const [maxMeters, setMaxMeters] = useState(initialMaxMeters);
+  const [showDepleted, setShowDepleted] = useState(initialShowDepleted);
+
+  // Debounced versions of text inputs
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
+  const [debouncedRollNumber, setDebouncedRollNumber] = useState(initialRollNumber);
+  const [debouncedMinM, setDebouncedMinM] = useState(initialMinMeters);
+  const [debouncedMaxM, setDebouncedMaxM] = useState(initialMaxMeters);
+
+  // Global totals from server (TAREA 3)
+  const [serverTotalMeters, setServerTotalMeters] = useState(initialTotalMeters);
 
   // ── Exit modal state ─────────────────────────────────────────────────────
   const [showExit, setShowExit] = useState(openExitModal);
@@ -218,27 +239,25 @@ export default function InventoryClient({
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  const filtered = useMemo(() => {
-    // Search is applied server-side; only guard stale category data during loading
-    return categoryFilter
-      ? rolls.filter(r => r.category.id === parseInt(categoryFilter))
-      : rolls;
-  }, [rolls, categoryFilter]);
+  // All filtering is server-side; filtered === rolls
+  const filtered = rolls;
 
-  const activeFilterCount = [search, categoryFilter].filter(Boolean).length;
+  const activeFilterCount = [
+    search, familyFilter, colorFilter, widthFilter,
+    rollNumberFilter, statusFilter, debouncedMinM, debouncedMaxM,
+    showDepleted ? 'depleted' : '',
+  ].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
 
-  // Resumen de rollos cuando hay búsqueda activa (usa debouncedSearch para evitar datos rancios)
-  const refSummary = useMemo(() => {
-    if (!debouncedSearch.trim() || filtered.length === 0) return null;
-    const active = filtered.filter(r => r.status !== 'DEPLETED');
-    const totalMeters = active.reduce((sum, r) => sum + r.currentMeters, 0);
-    const refs = new Set(active.map(r => r.product.code.replace(/(-\d+){1,2}$/, '')));
-    if (refs.size === 1) {
-      return { single: true, ref: [...refs][0], count: active.length, totalMeters };
-    }
-    return { single: false, ref: null, count: active.length, totalMeters };
-  }, [filtered, debouncedSearch]);
+  // Unique color/width options for filter dropdowns (derived from products prop)
+  const uniqueColors = useMemo(
+    () => [...new Set(products.map(p => p.color))].filter(Boolean).sort(),
+    [products],
+  );
+  const uniqueWidths = useMemo(
+    () => [...new Set(products.map(p => p.width))].filter(w => w > 0).sort((a, b) => a - b),
+    [products],
+  );
 
   const filteredWizardRolls = useMemo(() => {
     if (!wizardSearch.trim()) return wizardRolls;
@@ -273,27 +292,39 @@ export default function InventoryClient({
 
   // ── Effects ──────────────────────────────────────────────────────────────
 
-  // Debounce search input: actualiza debouncedSearch 300ms después del último keystroke
-  // y resetea la paginación para que los nuevos resultados empiecen desde la página 1
+  // Debounce text inputs: 300ms after last keystroke, reset to page 1
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(search);
+      setDebouncedRollNumber(rollNumberFilter);
+      setDebouncedMinM(minMeters);
+      setDebouncedMaxM(maxMeters);
       setServerPage(1);
     }, 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, rollNumberFilter, minMeters, maxMeters]);
 
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
-      // Si hay búsqueda inicial (desde URL), forzar fetch aunque sea page 1
-      if (serverPage === 1 && tab === 'all' && !debouncedSearch) return;
+      // Skip first fetch when all filters are default (SSR data is sufficient)
+      const allDefault = serverPage === 1 && tab === 'all' && !debouncedSearch && !familyFilter &&
+        !colorFilter && !widthFilter && !statusFilter && !debouncedRollNumber &&
+        !debouncedMinM && !debouncedMaxM && !showDepleted;
+      if (allDefault) return;
     }
     const ctrl = new AbortController();
     const params = new URLSearchParams({ page: String(serverPage), limit: String(SERVER_LIMIT) });
     if (tab === 'remnants') params.set('isRemnant', 'true');
-    if (categoryFilter) params.set('category', categoryFilter);
+    if (familyFilter) params.set('family', familyFilter);
     if (debouncedSearch) params.set('search', debouncedSearch);
+    if (colorFilter) params.set('color', colorFilter);
+    if (widthFilter) params.set('width', widthFilter);
+    if (statusFilter) params.set('status', statusFilter);
+    if (debouncedRollNumber) params.set('rollNumber', debouncedRollNumber);
+    if (debouncedMinM) params.set('minMeters', debouncedMinM);
+    if (debouncedMaxM) params.set('maxMeters', debouncedMaxM);
+    if (showDepleted) params.set('showDepleted', 'true');
     setIsFetching(true);
     fetch(`/api/inventory?${params}`, { signal: ctrl.signal })
       .then(r => r.json())
@@ -302,19 +333,32 @@ export default function InventoryClient({
           setRolls(json.data);
           setServerTotal(json.total ?? 0);
           setServerTotalPages(json.totalPages ?? 1);
+          setServerTotalMeters(json.totalMeters ?? 0);
         }
       })
       .catch(e => { if (e.name !== 'AbortError') console.error('inventory fetch error:', e); })
       .finally(() => setIsFetching(false));
     return () => ctrl.abort();
-  }, [serverPage, tab, categoryFilter, debouncedSearch]);
+  }, [serverPage, tab, familyFilter, colorFilter, widthFilter, statusFilter, showDepleted,
+      debouncedSearch, debouncedRollNumber, debouncedMinM, debouncedMaxM]);
 
   useEffect(() => {
     const t = setTimeout(() => {
-      updateUrl({ q: search, cat: categoryFilter, p: serverPage > 1 ? String(serverPage) : '' });
+      updateUrl({
+        q: search,
+        family: familyFilter,
+        color: colorFilter,
+        width: widthFilter,
+        status: statusFilter,
+        rollNum: rollNumberFilter,
+        minM: minMeters,
+        maxM: maxMeters,
+        depleted: showDepleted ? 'true' : '',
+        p: serverPage > 1 ? String(serverPage) : '',
+      });
     }, 350);
     return () => clearTimeout(t);
-  }, [search, categoryFilter, serverPage]);
+  }, [search, familyFilter, colorFilter, widthFilter, statusFilter, rollNumberFilter, minMeters, maxMeters, showDepleted, serverPage]);
 
   // Fetch prices for all selected rolls when client or selection changes
   useEffect(() => {
@@ -387,8 +431,11 @@ export default function InventoryClient({
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   function clearFilters() {
-    setSearch(''); setCategoryFilter('');
-    setDebouncedSearch(''); // limpiar inmediatamente sin esperar el debounce
+    setSearch(''); setFamilyFilter(''); setColorFilter(''); setWidthFilter('');
+    setRollNumberFilter(''); setStatusFilter(''); setMinMeters(''); setMaxMeters('');
+    setShowDepleted(false);
+    // Flush debounced values immediately so the fetch uses empty filters
+    setDebouncedSearch(''); setDebouncedRollNumber(''); setDebouncedMinM(''); setDebouncedMaxM('');
     setServerPage(1);
     updateUrl({});
   }
@@ -642,7 +689,18 @@ export default function InventoryClient({
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">Inventario</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{initialActiveCount} rollos activos</p>
+          {/* TAREA 3: global totals */}
+          <p className="text-sm text-gray-500 mt-0.5">
+            <span>{serverTotal} rollo{serverTotal !== 1 ? 's' : ''}</span>
+            {serverTotalMeters > 0 && (
+              <>
+                <span className="mx-1.5 text-gray-300">·</span>
+                <span className="font-medium text-gray-700">
+                  {serverTotalMeters.toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles
+                </span>
+              </>
+            )}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => openExitFlow()} className="bg-[#0A0A0A] text-white text-sm font-medium px-4 py-2 rounded hover:bg-[#1A1A1A] transition-colors">
@@ -668,52 +726,64 @@ export default function InventoryClient({
         ))}
       </div>
 
-      {/* ── Filter bar ── */}
-      <div className="flex flex-wrap gap-2 mb-3 items-center">
-        <div className="relative flex-1 min-w-48">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
-          <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por referencia..."
-            className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
+      {/* ── Filter bar (TAREA 2) ── */}
+      <div className="mb-3 space-y-2">
+        {/* Row 1: Familia · Consecutivo · Color · Ancho */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <select value={familyFilter} onChange={e => { setFamilyFilter(e.target.value); setServerPage(1); }}
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 min-w-[110px]">
+            <option value="">Familia: Todos</option>
+            <option value="LSFH">LSFH</option>
+            <option value="AS">AS</option>
+          </select>
+          <div className="relative flex-1 min-w-44">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
+            <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Consecutivo / referencia..."
+              className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
+          </div>
+          <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 min-w-[110px]">
+            <option value="">Color: Todos</option>
+            {uniqueColors.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={widthFilter} onChange={e => { setWidthFilter(e.target.value); setServerPage(1); }}
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 min-w-[110px]">
+            <option value="">Ancho: Todos</option>
+            {uniqueWidths.map(w => <option key={w} value={String(w)}>{w} cm</option>)}
+          </select>
         </div>
-        <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setServerPage(1); }}
-          className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400">
-          <option value="">Todos</option>
-          <option value="1">Velo</option>
-          <option value="2">Blackout</option>
-        </select>
-        {activeFilterCount > 0 && (
-          <button onClick={clearFilters}
-            className="text-xs text-gray-500 hover:text-gray-900 border border-[#E5E5E5] rounded px-3 py-2 hover:bg-gray-50 transition-colors">
-            ✕ Limpiar ({activeFilterCount})
-          </button>
-        )}
-      </div>
-
-      {/* ── Resumen de búsqueda ── */}
-      {refSummary && (
-        <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 flex flex-wrap gap-x-3 items-center text-sm">
-          {refSummary.single ? (
-            <>
-              <span className="font-semibold text-blue-900">Ref. {refSummary.ref}</span>
-              <span className="text-blue-400">·</span>
-              <span className="text-blue-700">{refSummary.count} rollo{refSummary.count !== 1 ? 's' : ''} activo{refSummary.count !== 1 ? 's' : ''}</span>
-              <span className="text-blue-400">·</span>
-              <span className="font-semibold text-blue-900">
-                {Number(refSummary.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="text-blue-700">{refSummary.count} rollo{refSummary.count !== 1 ? 's' : ''} encontrado{refSummary.count !== 1 ? 's' : ''}</span>
-              <span className="text-blue-400">·</span>
-              <span className="font-semibold text-blue-900">
-                {Number(refSummary.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m disponibles en total
-              </span>
-            </>
+        {/* Row 2: Estado · Núm. rollo · Metros min · Metros max · Mostrar agotados · Limpiar */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setServerPage(1); }}
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 min-w-[130px]">
+            <option value="">Estado: Todos</option>
+            <option value="ACTIVE">Activo</option>
+            <option value="REMNANT">Remanente</option>
+            <option value="WRITTEN_OFF">Dado de baja</option>
+          </select>
+          <input type="text" value={rollNumberFilter} onChange={e => setRollNumberFilter(e.target.value)}
+            placeholder="Núm. de rollo..."
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 w-36" autoComplete="off" />
+          <input type="number" min="0" value={minMeters} onChange={e => setMinMeters(e.target.value)}
+            placeholder="Min m"
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 w-20" />
+          <input type="number" min="0" value={maxMeters} onChange={e => setMaxMeters(e.target.value)}
+            placeholder="Máx m"
+            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 w-20" />
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+            <input type="checkbox" checked={showDepleted} onChange={e => { setShowDepleted(e.target.checked); setServerPage(1); }}
+              className="accent-gray-800" />
+            Mostrar agotados
+          </label>
+          {activeFilterCount > 0 && (
+            <button onClick={clearFilters}
+              className="text-xs text-gray-500 hover:text-gray-900 border border-[#E5E5E5] rounded px-3 py-2 hover:bg-gray-50 transition-colors">
+              ✕ Limpiar ({activeFilterCount})
+            </button>
           )}
         </div>
-      )}
+      </div>
 
       <p className="text-xs text-gray-400 mb-2 flex items-center gap-2">
         {isFetching
@@ -721,7 +791,7 @@ export default function InventoryClient({
           : rolls.length === 0
             ? 'Sin resultados'
             : <span>
-                Mostrando {filtered.length} de {rolls.length} rollos
+                Mostrando {rolls.length} de {serverTotal} rollos
                 {serverTotalPages > 1 && <span className="text-gray-300"> (pág. {serverPage}/{serverTotalPages})</span>}
               </span>
         }

@@ -102,7 +102,7 @@ export default function OrphanRemnantsClient({ items: initial, canEdit, isOwner 
         const json = await res.json();
         if (!res.ok) { setFormError(json.error ?? 'Error'); setFormLoading(false); return; }
         setItems(prev => prev.map(r => r.id === editId
-          ? { ...r, ...payload, updatedAt: Date.now() }
+          ? { ...r, ...payload, notes: payload.notes ?? null, updatedAt: Date.now() }
           : r,
         ));
       } else {

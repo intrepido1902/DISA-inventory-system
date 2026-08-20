@@ -54,6 +54,9 @@ async function getInventoryData(isRemnantTab: boolean, search = '') {
 
   if (isRemnantTab) {
     rollQuery = rollQuery.eq('status', 'REMNANT');
+  } else {
+    // TAREA 4: hide DEPLETED by default
+    rollQuery = rollQuery.neq('status', 'DEPLETED');
   }
   if (searchProductIds !== null) {
     if (searchProductIds.length === 0) {
@@ -65,21 +68,37 @@ async function getInventoryData(isRemnantTab: boolean, search = '') {
   }
   rollQuery = rollQuery.order('id', { ascending: true });
 
-  const [rollsRes, clientsRes, productsRes, lotsRes, remCountRes, activeCountRes] = await Promise.all([
+  // TAREA 3: totalMeters query (entire filtered set, no pagination)
+  let totalMetersQuery = db.from('Roll').select('currentMeters');
+  if (isRemnantTab) {
+    totalMetersQuery = totalMetersQuery.eq('status', 'REMNANT');
+  } else {
+    totalMetersQuery = totalMetersQuery.neq('status', 'DEPLETED');
+  }
+  if (searchProductIds !== null && searchProductIds.length > 0) {
+    totalMetersQuery = totalMetersQuery.in('productId', searchProductIds);
+  }
+
+  const [rollsRes, clientsRes, productsRes, lotsRes, remCountRes, activeCountRes, metersRes] = await Promise.all([
     rollQuery.range(0, 99),
     db.from('Client').select('id, name, type, sellsByRoll').eq('active', 1).order('name', { ascending: true }),
     db.from('Product').select('id, name, code, color, width, categoryId').eq('active', 1).order('name', { ascending: true }),
     db.from('ImportLot').select('id, lotNumber').order('importDate', { ascending: false }),
     db.from('Roll').select('id', { count: 'exact', head: true }).eq('status', 'REMNANT'),
     db.from('Roll').select('id', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+    searchProductIds?.length === 0 ? Promise.resolve({ data: [] }) : totalMetersQuery,
   ]);
 
   const total = rollsRes.count ?? 0;
   const limit = 100;
+  const totalMeters = ((metersRes as any).data ?? []).reduce(
+    (sum: number, r: any) => sum + (Number(r.currentMeters) || 0), 0,
+  );
 
   return {
     rolls: (rollsRes.data ?? []).map(mapRoll),
     total,
+    totalMeters,
     totalPages: Math.ceil(total / limit),
     remnantCount: remCountRes.count ?? 0,
     activeCount: activeCountRes.count ?? 0,
@@ -112,10 +131,14 @@ export default async function InventoryPage({
     exitModal?: string;
     q?: string;
     cat?: string;
+    family?: string;
     status?: string;
     color?: string;
+    width?: string;
     minM?: string;
     maxM?: string;
+    rollNum?: string;
+    depleted?: string;
     loc?: string;
   }>;
 }) {
@@ -128,6 +151,7 @@ export default async function InventoryPage({
     <InventoryClient
       initialRolls={data.rolls}
       initialTotal={data.total}
+      initialTotalMeters={data.totalMeters}
       initialTotalPages={data.totalPages}
       initialRemnantCount={data.remnantCount}
       initialActiveCount={data.activeCount}
@@ -139,12 +163,14 @@ export default async function InventoryPage({
       initialTab={isRemnantTab ? 'remnants' : 'all'}
       openExitModal={sp.exitModal === '1'}
       initialSearch={sp.q ?? ''}
-      initialCategory={sp.cat ?? ''}
+      initialFamily={sp.family ?? ''}
       initialStatus={sp.status ?? ''}
       initialColor={sp.color ?? ''}
+      initialWidth={sp.width ?? ''}
       initialMinMeters={sp.minM ?? ''}
       initialMaxMeters={sp.maxM ?? ''}
-      initialLocation={sp.loc ?? ''}
+      initialRollNumber={sp.rollNum ?? ''}
+      initialShowDepleted={sp.depleted === 'true'}
     />
   );
 }

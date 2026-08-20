@@ -1,11 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
 import { db } from '@/lib/db';
-import { BLACKOUT_COLOR_MAP } from '@/lib/colorMap';
-
-const REVERSE_BLACKOUT: Record<string, string> = Object.fromEntries(
-  Object.entries(BLACKOUT_COLOR_MAP).map(([k, v]) => [v, k])
-);
+import { getFamilyOrFilter, type ProductFamily } from '@/lib/productFamily';
 
 const ROLL_SELECT = `
   id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
@@ -53,104 +49,144 @@ export async function GET(request: NextRequest) {
   if (!session) return Response.json({ error: 'No autorizado' }, { status: 401 });
 
   const sp = new URL(request.url).searchParams;
-  const page = Math.max(1, parseInt(sp.get('page') ?? '1'));
+  const page  = Math.max(1, parseInt(sp.get('page')  ?? '1'));
   const limit = Math.min(500, Math.max(1, parseInt(sp.get('limit') ?? '100')));
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
+  const from  = (page - 1) * limit;
+  const to    = from + limit - 1;
 
-  const search = (sp.get('search') ?? '').trim().toLowerCase();
-  const statusParam = sp.get('status') ?? '';
-  const categoryFilter = (sp.get('category') ?? '').trim();
-  const colorFilter = (sp.get('color') ?? '').trim();
-  const minMeters = sp.get('minMeters') ?? '';
-  const maxMeters = sp.get('maxMeters') ?? '';
-  const locationFilter = (sp.get('location') ?? '').trim();
-  const isRemnantParam = sp.get('isRemnant') ?? '';
-  const productIdParam = sp.get('productId') ?? '';
+  // ── Filter params ────────────────────────────────────────────────────────────
+  // Product-level filters
+  const search       = (sp.get('search')   ?? '').trim();   // consecutivo / reference text
+  const familyParam  = (sp.get('family')   ?? '').trim();   // 'LSFH' | 'AS'
+  const categoryFilter = (sp.get('category') ?? '').trim(); // backward compat (1=Velo, 2=Blackout)
+  const colorFilter  = (sp.get('color')    ?? '').trim();   // exact Product.color match
+  const widthFilter  = (sp.get('width')    ?? '').trim();   // exact Product.width match (number)
+
+  // Roll-level filters
+  const statusParam      = (sp.get('status')     ?? '').trim();          // ACTIVE|REMNANT|WRITTEN_OFF
+  const isRemnantParam   = (sp.get('isRemnant')  ?? '');                 // 'true' for remnants tab
+  const productIdParam   = (sp.get('productId')  ?? '');                 // direct productId (exit modal)
+  const rollNumberSearch = (sp.get('rollNumber') ?? '').trim();          // partial match on rollNumber/disaNumber
+  const minMeters        = (sp.get('minMeters')  ?? '').trim();
+  const maxMeters        = (sp.get('maxMeters')  ?? '').trim();
+  const showDepleted     = sp.get('showDepleted') === 'true';            // TAREA 4: default hidden
+
+  const EMPTY = Response.json({ data: [], total: 0, totalMeters: 0, page, limit, totalPages: 0 });
 
   try {
-    // ── Step 1: resolve product IDs for category + color filters ─────────────
-    // We intersect them so a roll must satisfy both category AND color.
+    // ── Step 1: resolve product IDs from Product-level filters ───────────────
     let productIdFilter: number[] | null = null;
 
+    // Helper: intersect/set a new list of product IDs
+    function intersectProductIds(newIds: number[]): boolean {
+      if (newIds.length === 0) return false; // empty → no matches
+      productIdFilter = productIdFilter !== null
+        ? productIdFilter.filter(id => newIds.includes(id))
+        : newIds;
+      return productIdFilter.length > 0;
+    }
+
+    // Family filter (TAREA 1+2)
+    if (familyParam === 'LSFH' || familyParam === 'AS') {
+      const orExpr = getFamilyOrFilter(familyParam as ProductFamily);
+      const { data: pRows } = await (db as any).from('Product').select('id').or(orExpr);
+      if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
+    }
+
+    // Backward-compat category filter
     if (categoryFilter) {
       const catId = parseInt(categoryFilter);
-      if (isNaN(catId)) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
-      const { data: pRows } = await db.from('Product').select('id').eq('categoryId', catId);
-      const ids = (pRows ?? []).map((p: any) => p.id as number);
-      if (ids.length === 0) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
-      productIdFilter = ids;
+      if (isNaN(catId)) return EMPTY;
+      const { data: pRows } = await (db as any).from('Product').select('id').eq('categoryId', catId);
+      if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
     }
 
+    // Color filter
     if (colorFilter) {
-      const reverseCode = REVERSE_BLACKOUT[colorFilter];
-      const colorValues = reverseCode ? [colorFilter, reverseCode] : [colorFilter];
-      const { data: pRows } = await db.from('Product').select('id').in('color', colorValues);
-      const colorIds = (pRows ?? []).map((p: any) => p.id as number);
-      if (colorIds.length === 0) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
-      productIdFilter = productIdFilter !== null
-        ? productIdFilter.filter(id => colorIds.includes(id))
-        : colorIds;
-      if (productIdFilter.length === 0) return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
+      const { data: pRows } = await (db as any).from('Product').select('id').eq('color', colorFilter);
+      if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
     }
 
-    // ── Step 2: filter product IDs by reference code search ──────────────────
+    // Width filter
+    if (widthFilter) {
+      const widthNum = parseInt(widthFilter);
+      if (!isNaN(widthNum)) {
+        const { data: pRows } = await (db as any).from('Product').select('id').eq('width', widthNum);
+        if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
+      }
+    }
+
+    // Reference / consecutivo text search (ilike on Product.code)
     if (search) {
-      const { data: pRows } = await db.from('Product').select('id').ilike('code', `%${search}%`);
-      const searchIds = (pRows ?? []).map((p: any) => p.id as number);
-      if (searchIds.length === 0) {
-        return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
+      const { data: pRows } = await (db as any).from('Product').select('id').ilike('code', `%${search}%`);
+      if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
+    }
+
+    // ── Step 2: build Roll filter helper ──────────────────────────────────────
+    function applyRollFilters(q: any): any {
+      // Remnant tab takes priority over status dropdown
+      if (isRemnantParam === 'true') {
+        q = q.eq('status', 'REMNANT');
+      } else if (statusParam) {
+        q = q.eq('status', statusParam);
+      } else if (!showDepleted) {
+        // TAREA 4: hide DEPLETED by default
+        q = q.neq('status', 'DEPLETED');
       }
+
+      // Direct productId filter (exit modal quick-select)
+      if (productIdParam && !isNaN(parseInt(productIdParam))) {
+        q = q.eq('productId', parseInt(productIdParam));
+      }
+
+      // Combined product-level filter (family + category + color + width + search)
       if (productIdFilter !== null) {
-        const searchSet = new Set(searchIds);
-        productIdFilter = productIdFilter.filter(id => searchSet.has(id));
-        if (productIdFilter.length === 0) {
-          return Response.json({ data: [], total: 0, page, limit, totalPages: 0 });
-        }
-      } else {
-        productIdFilter = searchIds;
+        q = q.in('productId', productIdFilter);
       }
+
+      // Meters range
+      if (minMeters) q = q.gte('currentMeters', parseFloat(minMeters));
+      if (maxMeters) q = q.lte('currentMeters', parseFloat(maxMeters));
+
+      // Roll number / DISA number partial match (TAREA 2)
+      if (rollNumberSearch) {
+        q = q.or(`rollNumber.ilike.%${rollNumberSearch}%,disaNumber.ilike.%${rollNumberSearch}%`);
+      }
+
+      return q;
     }
 
-    // ── Step 3: build main Roll query ─────────────────────────────────────────
-    let query = db.from('Roll').select(ROLL_SELECT, { count: 'exact' });
+    // ── Step 3: paginated data query ──────────────────────────────────────────
+    let dataQuery: any = (db as any).from('Roll').select(ROLL_SELECT, { count: 'exact' });
+    dataQuery = applyRollFilters(dataQuery);
 
-    // Remnants tab / status filter — after Cambio 3, remnants have status='REMNANT'
-    if (isRemnantParam === 'true') {
-      query = query.eq('status', 'REMNANT');
-    } else if (statusParam === 'REMNANT') {
-      query = query.eq('status', 'REMNANT');
-    } else if (statusParam) {
-      query = query.eq('status', statusParam);
+    // TAREA 2: sort by currentMeters ASC when searching by reference; else by id ASC
+    if (search || rollNumberSearch) {
+      dataQuery = dataQuery.order('currentMeters', { ascending: true });
+    } else {
+      dataQuery = dataQuery.order('id', { ascending: true });
     }
 
-    // Direct product ID filter (used by exit modal)
-    if (productIdParam && !isNaN(parseInt(productIdParam))) {
-      query = query.eq('productId', parseInt(productIdParam));
-    }
-
-    // Combined category + color product ID filter
-    if (productIdFilter !== null) {
-      query = query.in('productId', productIdFilter);
-    }
-
-    // Meters range
-    if (minMeters) query = query.gte('currentMeters', parseFloat(minMeters));
-    if (maxMeters) query = query.lte('currentMeters', parseFloat(maxMeters));
-
-    // Location
-    if (locationFilter) query = query.ilike('location', `%${locationFilter}%`);
-
-    // Order by consecutivo (id) ascending
-    query = query.order('id', { ascending: true });
-
-    const { data, count, error } = await query.range(from, to);
+    const { data, count, error } = await dataQuery.range(from, to);
     if (error) throw error;
 
     const total = count ?? 0;
+
+    // ── Step 4: global totalMeters for the entire filtered set (TAREA 3) ──────
+    let totalMeters = 0;
+    if (total > 0) {
+      let metersQuery: any = (db as any).from('Roll').select('currentMeters');
+      metersQuery = applyRollFilters(metersQuery);
+      const { data: mRows, error: mErr } = await metersQuery;
+      if (!mErr && mRows) {
+        totalMeters = (mRows as any[]).reduce((sum: number, r: any) => sum + (Number(r.currentMeters) || 0), 0);
+      }
+    }
+
     return Response.json({
       data: (data ?? []).map(mapRoll),
       total,
+      totalMeters,
       page,
       limit,
       totalPages: Math.ceil(total / limit),

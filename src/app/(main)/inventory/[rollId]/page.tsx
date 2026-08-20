@@ -8,6 +8,7 @@ import ReimprimirButton from './ReimprimirButton';
 import RollLabelButton from './RollLabelButton';
 import DefectButton from './DefectButton';
 import ClearDefectButton from './ClearDefectButton';
+import ReturnButton from './ReturnButton';
 
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'Activo',
@@ -101,7 +102,7 @@ export default async function RollTracePage({
   const refBase = parts[0]; // e.g. "2306"
 
   const movRes = await dbAny.from('Movement').select(`
-    id, type, meters, notes, createdAt, reverted, pricePerMeter, discount, total, saleId,
+    id, type, meters, notes, createdAt, pricePerMeter, discount, total, saleId,
     approvalStatus, approvedAt,
     user:userId(name),
     approver:approvedBy(name),
@@ -197,6 +198,19 @@ export default async function RollTracePage({
               estado: STATUS_LABEL[r.status] ?? r.status,
               actualizadoEn: new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' }),
             }} />
+            {/* TAREA 5: Re-ingreso / Devolución — OWNER + ADMIN only */}
+            {(session!.role === 'OWNER' || session!.role === 'ADMIN') && (
+              <ReturnButton
+                rollId={rollIdNum}
+                initialMeters={r.initialMeters as number}
+                currentMeters={r.currentMeters as number}
+                consecutivo={r.disaNumber ?? `ID ${rollIdNum}`}
+                referencia={refDisplay || '—'}
+                color={displayColor}
+                anchoStr={r.product?.width ? `${r.product.width} cm` : '—'}
+                estado={STATUS_LABEL[r.status] ?? r.status}
+              />
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
