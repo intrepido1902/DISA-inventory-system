@@ -3,6 +3,9 @@
 import { useState, useMemo } from 'react';
 import { formatColombianDate } from '@/lib/dateUtils';
 import { ACTION_LABELS, ACTION_COLORS, formatAuditData } from '@/lib/auditLabels';
+import { generateSalePDF, type SalePDFData } from '@/lib/generateSalePDF';
+import { generateRollLabel } from '@/lib/generateRollLabel';
+import { getBlackoutColorName, isBlackoutProduct } from '@/lib/colorMap';
 
 interface AuditLog {
   id: number; action: string; entity: string; entityId: number;
@@ -10,6 +13,141 @@ interface AuditLog {
   userName: string; userEmail: string;
 }
 interface User { id: number; name: string }
+
+// ── Reprint helpers ───────────────────────────────────────────────────────────
+const STATUS_LBL: Record<string, string> = {
+  ACTIVE: 'Activo', REMNANT: 'Remanente', DEPLETED: 'Agotado',
+  DEFECTIVE: 'Defectuoso', WRITTEN_OFF: 'Dado de baja',
+};
+
+function buildFormatRef(code: string, isBlackout: boolean): string {
+  const parts = code.split('-');
+  return isBlackout ? `${parts[0]}-${parts[1] ?? ''}` : parts[0];
+}
+
+function buildColor(color: string, categoryName: string): string {
+  return isBlackoutProduct(categoryName) ? getBlackoutColorName(color) : color;
+}
+
+function displayRollNumber(rollNumber: string): string {
+  const n = parseInt(rollNumber, 10);
+  return isNaN(n) ? rollNumber : String(n);
+}
+
+interface ReprintState { loading: boolean; error: string | null }
+
+function ReprintButtons({ log, isOwner }: { log: AuditLog; isOwner: boolean }) {
+  const [state, setState] = useState<ReprintState>({ loading: false, error: null });
+
+  if (log.action !== 'EXIT_FULL' && log.action !== 'EXIT_PARTIAL') return null;
+  // entityId is the rollId for EXIT actions
+  const rollId    = log.entityId;
+  const createdAt = log.createdAt;
+
+  async function fetchReprintData() {
+    setState({ loading: true, error: null });
+    try {
+      const res = await fetch(`/api/audit/reprint?rollId=${rollId}&createdAt=${createdAt}`);
+      if (!res.ok) {
+        const j = await res.json();
+        setState({ loading: false, error: j.error ?? 'Error' });
+        return null;
+      }
+      const data = await res.json();
+      setState({ loading: false, error: null });
+      return data;
+    } catch {
+      setState({ loading: false, error: 'Error de conexión' });
+      return null;
+    }
+  }
+
+  async function handleFactura() {
+    const data = await fetchReprintData();
+    if (!data) return;
+    const { sale, movements } = data;
+
+    const saleDate = new Date(sale.createdAt);
+    const colombianDate = new Date(saleDate.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+    const fecha = colombianDate.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const hora  = colombianDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const pdfData: SalePDFData = {
+      cliente: { nombre: sale.clientName },
+      rollos: movements.map((m: any) => {
+        const isBlackout = isBlackoutProduct(m.roll.product.category.name);
+        const subtotal = m.meters * m.pricePerMeter;
+        return {
+          consecutivo: m.roll.disaNumber ?? displayRollNumber(m.roll.rollNumber),
+          referencia:  buildFormatRef(m.roll.product.code, isBlackout),
+          color:       buildColor(m.roll.product.color, m.roll.product.category.name),
+          ancho:       m.roll.product.width,
+          metros:      m.meters,
+          precioMetro: m.pricePerMeter,
+          subtotal,
+        };
+      }),
+      precio: {
+        descuento:        sale.discount,
+        subtotalGeneral:  sale.subtotal,
+        total:            sale.total,
+      },
+      venta: { fecha, hora, documentId: sale.saleId, registradoPor: log.userName },
+    };
+    generateSalePDF(pdfData);
+  }
+
+  async function handleEtiqueta() {
+    const data = await fetchReprintData();
+    if (!data || !data.roll) return;
+    const { roll } = data;
+
+    const today = new Date().toLocaleDateString('es-CO', {
+      timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+    const isBlackout = isBlackoutProduct(roll.product.category.name);
+
+    generateRollLabel({
+      consecutivo:   roll.disaNumber ?? displayRollNumber(roll.rollNumber),
+      referencia:    buildFormatRef(roll.product.code, isBlackout),
+      color:         buildColor(roll.product.color, roll.product.category.name),
+      anchoStr:      `${roll.product.width} cm`,
+      metrosActuales: roll.currentMeters,
+      metrosIniciales: roll.initialMeters,
+      estado:        STATUS_LBL[roll.status] ?? roll.status,
+      actualizadoEn: today,
+    });
+  }
+
+  return (
+    <div className="flex gap-1.5 items-center flex-wrap">
+      {state.loading && (
+        <span className="text-xs text-gray-400">Cargando…</span>
+      )}
+      {state.error && (
+        <span className="text-xs text-red-500">{state.error}</span>
+      )}
+      {!state.loading && !state.error && (
+        <>
+          {isOwner && (
+            <button
+              onClick={handleFactura}
+              className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded px-2 py-0.5 transition-colors whitespace-nowrap"
+            >
+              📄 Tirilla
+            </button>
+          )}
+          <button
+            onClick={handleEtiqueta}
+            className="text-xs text-amber-700 hover:text-amber-900 border border-amber-300 hover:border-amber-500 bg-amber-50 hover:bg-amber-100 rounded px-2 py-0.5 transition-colors whitespace-nowrap"
+          >
+            🏷️ Etiqueta
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
 
 const FILTER_GROUPS = [
   {
@@ -56,7 +194,12 @@ const FILTER_GROUPS = [
   },
 ];
 
-export default function AuditClient({ logs, users }: { logs: AuditLog[]; users: User[] }) {
+export default function AuditClient({
+  logs, users, userRole,
+}: {
+  logs: AuditLog[]; users: User[]; userRole: string;
+}) {
+  const isOwner = userRole === 'OWNER';
   const [actionFilter, setActionFilter] = useState('');
   const [userFilter, setUserFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -128,12 +271,13 @@ export default function AuditClient({ logs, users }: { logs: AuditLog[]; users: 
                 <th className="px-4 py-3 text-left">Entidad</th>
                 <th className="px-4 py-3 text-left">Antes</th>
                 <th className="px-4 py-3 text-left">Después</th>
+                <th className="px-4 py-3 text-left">Reimprimir</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                     No hay registros de auditoría
                   </td>
                 </tr>
@@ -160,6 +304,9 @@ export default function AuditClient({ logs, users }: { logs: AuditLog[]; users: 
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-700 max-w-52">
                       {formatAuditData(log.newData, users)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <ReprintButtons log={log} isOwner={isOwner} />
                     </td>
                   </tr>
                 ))

@@ -80,8 +80,13 @@ function rollColor(roll: Roll): string {
   return roll.product.color;
 }
 
+// Returns the price-lookup key for a product code.
+// Numeric-only prefix (e.g. "2242-1-300")  → "2242"
+// Alpha prefix      (e.g. "LSFH2306-1-280") → "LSFH2306-1"  (includes color segment)
 function baseRef(code: string): string {
-  return code.split('-')[0];
+  const parts = code.split('-');
+  if (/^\d+$/.test(parts[0])) return parts[0];
+  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : parts[0];
 }
 
 function updateUrl(filters: Record<string, string>) {

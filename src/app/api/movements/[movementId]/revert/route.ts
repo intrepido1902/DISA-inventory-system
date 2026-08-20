@@ -23,7 +23,7 @@ export async function POST(
     // 1. Fetch the movement
     const movRes: any = await dbAny
       .from('Movement')
-      .select('id, type, meters, rollId, reverted')
+      .select('id, type, meters, rollId, saleId, notes')
       .eq('id', movId)
       .single();
 
@@ -33,12 +33,19 @@ export async function POST(
 
     const mov = movRes.data;
 
-    if (Boolean(mov.reverted)) {
-      return Response.json({ error: 'Este movimiento ya fue revertido' }, { status: 400 });
-    }
-
     if (mov.type !== 'EXIT_FULL' && mov.type !== 'EXIT_PARTIAL') {
       return Response.json({ error: 'Solo se pueden revertir salidas' }, { status: 400 });
+    }
+
+    // Guard against double-revert: check if a RETURN for this movement already exists
+    const existingReturn: any = await dbAny
+      .from('Movement')
+      .select('id')
+      .eq('type', 'RETURN')
+      .ilike('notes', `%#${movId}%`)
+      .maybeSingle();
+    if (existingReturn.data) {
+      return Response.json({ error: 'Este movimiento ya fue revertido' }, { status: 400 });
     }
 
     // 2. Fetch the roll (need initialMeters to recalculate status)
@@ -81,10 +88,7 @@ export async function POST(
       updatedAt: now,
     }).eq('id', mov.rollId);
 
-    // 6. Mark movement as reverted
-    await dbAny.from('Movement').update({ reverted: true }).eq('id', movId);
-
-    // 7. Create RETURN movement
+    // 6. Create RETURN movement (marks the revert; no separate reverted column in schema)
     await dbAny.from('Movement').insert({
       type: 'RETURN',
       rollId: mov.rollId,
@@ -93,7 +97,6 @@ export async function POST(
       saleId: null,
       notes: `Reversión del movimiento #${movId}`,
       barcodeUsed: 0,
-      reverted: false,
       createdAt: now,
     });
 

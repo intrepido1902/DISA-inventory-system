@@ -12,6 +12,8 @@ import {
   ClipboardList,
   AlertTriangle,
   LogOut,
+  Receipt,
+  Scissors,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -36,6 +38,8 @@ const NAV: NavItem[] = [
   { href: '/clients',          icon: Users,             label: 'Clientes',         roles: ['OWNER', 'ADMIN'] },
   { href: '/pending-defects',  icon: AlertTriangle,     label: 'Bajas pendientes', roles: ['OWNER'] },
   { href: '/users',            icon: UserCog,           label: 'Usuarios',         roles: ['OWNER'] },
+  { href: '/sales',            icon: Receipt,            label: 'Ventas',           roles: ['OWNER', 'ADMIN'] },
+  { href: '/orphan-remnants', icon: Scissors,           label: 'Reman. huérfanos', roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
   { href: '/audit',            icon: ClipboardList,     label: 'Auditoría',        roles: ['OWNER', 'ADMIN'] },
 ];
 

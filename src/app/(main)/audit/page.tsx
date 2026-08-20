@@ -33,5 +33,5 @@ export default async function AuditPage() {
   const session = await getSession();
   if (!canSeeCatalog(session!.role as Role)) redirect('/dashboard');
   const { logs, users } = await getAuditData();
-  return <AuditClient logs={logs} users={users} />;
+  return <AuditClient logs={logs} users={users} userRole={session!.role} />;
 }
