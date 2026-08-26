@@ -230,6 +230,15 @@ export default function InventoryClient({
   const [entryBarcode, setEntryBarcode] = useState('');
   const [entryLoading, setEntryLoading] = useState(false);
 
+  // ── Manual roll add modal state ──────────────────────────────────────────
+  const [showManualAdd, setShowManualAdd] = useState(false);
+  const [manualRollNumber, setManualRollNumber] = useState('');
+  const [manualProductId, setManualProductId] = useState('');
+  const [manualMeters, setManualMeters] = useState('');
+  const [manualLocation, setManualLocation] = useState('Bodega');
+  const [manualHasDefect, setManualHasDefect] = useState(false);
+  const [manualLoading, setManualLoading] = useState(false);
+
   const searchRef = useRef<HTMLInputElement>(null);
   const isFirstMount = useRef(true);
 
@@ -680,6 +689,38 @@ export default function InventoryClient({
     }
   }
 
+  async function handleManualAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!manualRollNumber.trim() || !manualProductId || !manualMeters) {
+      setToast({ message: 'Completa consecutivo, referencia y metros iniciales', type: 'error' }); return;
+    }
+    setManualLoading(true);
+    try {
+      const res = await fetch('/api/inventory/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rollNumber: manualRollNumber.trim(),
+          productId: parseInt(manualProductId),
+          initialMeters: parseFloat(manualMeters),
+          location: manualLocation.trim() || 'Bodega',
+          hasDefect: manualHasDefect,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setToast({ message: data.error ?? 'Error al agregar el rollo', type: 'error' }); return; }
+      setToast({ message: 'Rollo agregado correctamente. Recargando...', type: 'success' });
+      setShowManualAdd(false);
+      setManualRollNumber(''); setManualProductId(''); setManualMeters('');
+      setManualLocation('Bodega'); setManualHasDefect(false);
+      router.refresh();
+    } catch {
+      setToast({ message: 'Error de conexión', type: 'error' });
+    } finally {
+      setManualLoading(false);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -709,6 +750,11 @@ export default function InventoryClient({
           {canManage && (
             <button onClick={() => setShowEntry(true)} className="bg-white border border-[#E5E5E5] text-gray-700 text-sm font-medium px-4 py-2 rounded hover:bg-gray-50 transition-colors">
               + Nueva entrada
+            </button>
+          )}
+          {canManage && (
+            <button onClick={() => setShowManualAdd(true)} className="bg-white border border-[#E5E5E5] text-gray-700 text-sm font-medium px-4 py-2 rounded hover:bg-gray-50 transition-colors">
+              + Agregar rollo
             </button>
           )}
         </div>
@@ -1513,6 +1559,65 @@ export default function InventoryClient({
                 <button type="button" onClick={() => setShowEntry(false)} className="flex-1 border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
                 <button type="submit" disabled={entryLoading} className="flex-1 bg-[#0A0A0A] text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-50">
                   {entryLoading ? 'Guardando...' : 'Registrar rollo'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Agregar rollo manualmente (OWNER/ADMIN) ── */}
+      {showManualAdd && (
+        <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowManualAdd(false)}>
+          <div className="bg-white w-full sm:rounded-xl rounded-t-2xl shadow-2xl sm:max-w-md p-6 max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-gray-900">Agregar rollo</h2>
+              <button onClick={() => setShowManualAdd(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <form onSubmit={handleManualAdd} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1">
+                  Consecutivo <span className="text-red-400">*</span>
+                </label>
+                <input type="text" value={manualRollNumber} onChange={e => setManualRollNumber(e.target.value)} required
+                  className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
+                  placeholder="Ej. 3100" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1">
+                  Referencia <span className="text-red-400">*</span>
+                </label>
+                <select value={manualProductId} onChange={e => setManualProductId(e.target.value)} required
+                  className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400">
+                  <option value="">Seleccionar producto</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1">
+                    Metros iniciales <span className="text-red-400">*</span>
+                  </label>
+                  <input type="number" step="0.1" min="0.1" value={manualMeters} onChange={e => setManualMeters(e.target.value)} required
+                    className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400" placeholder="150" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1">Ubicación</label>
+                  <input type="text" value={manualLocation} onChange={e => setManualLocation(e.target.value)}
+                    className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400" placeholder="Bodega" />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none pt-1">
+                <input type="checkbox" checked={manualHasDefect} onChange={e => setManualHasDefect(e.target.checked)}
+                  className="accent-gray-800" />
+                Tiene defecto
+              </label>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowManualAdd(false)} className="flex-1 border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
+                <button type="submit" disabled={manualLoading} className="flex-1 bg-[#0A0A0A] text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-50">
+                  {manualLoading ? 'Guardando...' : 'Agregar rollo'}
                 </button>
               </div>
             </form>
