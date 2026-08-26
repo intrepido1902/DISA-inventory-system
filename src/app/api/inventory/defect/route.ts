@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
 
     const now = Date.now();
 
+    // OWNER/ADMIN can register a write-off/defect immediately, no approval flow.
+    // WAREHOUSE still goes through the PENDING → OWNER approves/rejects flow.
+    const autoApprove = session.role === 'OWNER' || session.role === 'ADMIN';
+
     const movRes: any = await dbAny.from('Movement').insert({
       type,
       rollId: Number(rollId),
@@ -41,9 +45,9 @@ export async function POST(request: NextRequest) {
       userId: session.userId,
       notes: notes?.trim() || null,
       barcodeUsed: 0,
-      approvalStatus: 'PENDING',
-      approvedBy: null,
-      approvedAt: null,
+      approvalStatus: autoApprove ? 'APPROVED' : 'PENDING',
+      approvedBy: autoApprove ? session.userId : null,
+      approvedAt: autoApprove ? now : null,
       defectDiscountPct: type === 'DEFECT_DISCOUNT' ? (Number(defectDiscountPct) || null) : null,
       createdAt: now,
     }).select('id').single();
@@ -53,17 +57,47 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Error al registrar la baja' }, { status: 500 });
     }
 
+    if (autoApprove) {
+      // Apply the roll state change immediately — same effect as the OWNER approval endpoint.
+      if (type === 'WRITE_OFF') {
+        // The Movement's `meters` is the roll's full currentMeters at write-off time (set above),
+        // so the roll always drains to 0 — same as the OWNER approval endpoint.
+        await dbAny.from('Roll').update({
+          status: 'WRITTEN_OFF',
+          currentMeters: 0,
+          isRemnant: 0,
+          updatedAt: now,
+        }).eq('id', Number(rollId));
+      } else if (type === 'DEFECT_REPLACEMENT') {
+        await dbAny.from('Roll').update({
+          status: 'DEFECTIVE',
+          updatedAt: now,
+        }).eq('id', Number(rollId));
+      } else if (type === 'DEFECT_DISCOUNT') {
+        await dbAny.from('Roll').update({
+          hasDefect: true,
+          defectNote: notes?.trim() || null,
+          defectDiscountPct: Number(defectDiscountPct) || null,
+          updatedAt: now,
+        }).eq('id', Number(rollId));
+      }
+    }
+
     await dbAny.from('AuditLog').insert({
       userId: session.userId,
-      action: `${type}_PENDING`,
+      action: autoApprove ? `${type}_APPROVED` : `${type}_PENDING`,
       entity: 'Roll',
       entityId: Number(rollId),
       oldData: JSON.stringify({ status: roll.status, currentMeters: roll.currentMeters }),
-      newData: JSON.stringify({ approvalStatus: 'PENDING', type, defectDiscountPct: defectDiscountPct ?? null }),
+      newData: JSON.stringify({
+        approvalStatus: autoApprove ? 'APPROVED' : 'PENDING',
+        ...(autoApprove ? { approvedBy: session.userId } : {}),
+        type, defectDiscountPct: defectDiscountPct ?? null,
+      }),
       createdAt: now,
     });
 
-    return Response.json({ ok: true, movementId: movRes.data.id });
+    return Response.json({ ok: true, movementId: movRes.data.id, autoApproved: autoApprove });
   } catch (err) {
     console.error('POST /api/inventory/defect error:', err);
     return Response.json({ error: 'Error al registrar la baja' }, { status: 500 });

@@ -89,7 +89,8 @@ export async function GET(request: NextRequest) {
     // Family filter (TAREA 1+2)
     if (familyParam === 'LSFH' || familyParam === 'AS') {
       const orExpr = getFamilyOrFilter(familyParam as ProductFamily);
-      const { data: pRows } = await (db as any).from('Product').select('id').or(orExpr);
+      const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').or(orExpr);
+      if (pErr) { console.error('[inventory] family filter error:', pErr); throw pErr; }
       if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
     }
 
@@ -97,13 +98,15 @@ export async function GET(request: NextRequest) {
     if (categoryFilter) {
       const catId = parseInt(categoryFilter);
       if (isNaN(catId)) return EMPTY;
-      const { data: pRows } = await (db as any).from('Product').select('id').eq('categoryId', catId);
+      const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').eq('categoryId', catId);
+      if (pErr) { console.error('[inventory] category filter error:', pErr); throw pErr; }
       if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
     }
 
     // Color filter
     if (colorFilter) {
-      const { data: pRows } = await (db as any).from('Product').select('id').eq('color', colorFilter);
+      const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').eq('color', colorFilter);
+      if (pErr) { console.error('[inventory] color filter error:', pErr); throw pErr; }
       if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
     }
 
@@ -111,15 +114,18 @@ export async function GET(request: NextRequest) {
     if (widthFilter) {
       const widthNum = parseInt(widthFilter);
       if (!isNaN(widthNum)) {
-        const { data: pRows } = await (db as any).from('Product').select('id').eq('width', widthNum);
+        const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').eq('width', widthNum);
+        if (pErr) { console.error('[inventory] width filter error:', pErr); throw pErr; }
         if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
       }
     }
 
-    // Reference / consecutivo text search (ilike on Product.code)
+    // Reference text search — Product.code only (consecutivo has its own dedicated field/param below)
     if (search) {
-      const { data: pRows } = await (db as any).from('Product').select('id').ilike('code', `%${search}%`);
-      if (!intersectProductIds((pRows ?? []).map((p: any) => p.id as number))) return EMPTY;
+      const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').ilike('code', `%${search}%`);
+      if (pErr) { console.error('[inventory] search (product.code) error:', pErr); throw pErr; }
+      const searchIds = (pRows ?? []).map((p: any) => p.id as number);
+      if (!intersectProductIds(searchIds)) return EMPTY;
     }
 
     // ── Step 2: build Roll filter helper ──────────────────────────────────────
@@ -148,7 +154,7 @@ export async function GET(request: NextRequest) {
       if (minMeters) q = q.gte('currentMeters', parseFloat(minMeters));
       if (maxMeters) q = q.lte('currentMeters', parseFloat(maxMeters));
 
-      // Roll number / DISA number partial match (TAREA 2)
+      // Consecutivo search — partial match on rollNumber OR disaNumber (the unique per-roll identifier)
       if (rollNumberSearch) {
         q = q.or(`rollNumber.ilike.%${rollNumberSearch}%,disaNumber.ilike.%${rollNumberSearch}%`);
       }

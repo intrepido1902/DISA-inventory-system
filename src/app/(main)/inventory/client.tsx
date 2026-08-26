@@ -235,7 +235,7 @@ export default function InventoryClient({
 
   const canManage = userRole === 'OWNER' || userRole === 'ADMIN';
   const isOwner = userRole === 'OWNER';
-  const colCount = isOwner ? 11 : 10;
+  const colCount = 9;
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
@@ -244,7 +244,7 @@ export default function InventoryClient({
 
   const activeFilterCount = [
     search, familyFilter, colorFilter, widthFilter,
-    rollNumberFilter, statusFilter, debouncedMinM, debouncedMaxM,
+    statusFilter, debouncedRollNumber, debouncedMinM, debouncedMaxM,
     showDepleted ? 'depleted' : '',
   ].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
@@ -739,7 +739,13 @@ export default function InventoryClient({
           <div className="relative flex-1 min-w-44">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">⊘</span>
             <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Consecutivo / referencia..."
+              placeholder="Referencia (código de producto)..."
+              className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
+          </div>
+          <div className="relative flex-1 min-w-44">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">#</span>
+            <input type="text" value={rollNumberFilter} onChange={e => setRollNumberFilter(e.target.value)}
+              placeholder="Consecutivo (No. de rollo)..."
               className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
           </div>
           <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}
@@ -762,9 +768,6 @@ export default function InventoryClient({
             <option value="REMNANT">Remanente</option>
             <option value="WRITTEN_OFF">Dado de baja</option>
           </select>
-          <input type="text" value={rollNumberFilter} onChange={e => setRollNumberFilter(e.target.value)}
-            placeholder="Núm. de rollo..."
-            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 w-36" autoComplete="off" />
           <input type="number" min="0" value={minMeters} onChange={e => setMinMeters(e.target.value)}
             placeholder="Min m"
             className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 w-20" />
@@ -807,7 +810,6 @@ export default function InventoryClient({
             <thead>
               <tr className="border-b border-[#E5E5E5] text-xs text-gray-500 uppercase tracking-wide bg-gray-50">
                 <th className="px-4 py-3 text-left">Consecutivo</th>
-                <th className="px-4 py-3 text-left">No. Rollo</th>
                 <th className="px-4 py-3 text-left">Referencia</th>
                 <th className="px-4 py-3 text-left">Producto</th>
                 <th className="px-4 py-3 text-left">Color</th>
@@ -815,7 +817,6 @@ export default function InventoryClient({
                 <th className="px-4 py-3 text-left">Metros</th>
                 <th className="px-4 py-3 text-left">Estado</th>
                 <th className="px-4 py-3 text-left">Ubicación</th>
-                {isOwner && <th className="px-4 py-3 text-right">Precio B2B</th>}
                 <th className="px-4 py-3 text-center">Acciones</th>
               </tr>
             </thead>
@@ -840,7 +841,6 @@ export default function InventoryClient({
                           ? <span className="font-bold text-gray-900">{roll.disaNumber}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{displayRollNumber(roll.rollNumber)}</td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold text-gray-700">{ref}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{pName}</td>
                       <td className="px-4 py-3 text-xs text-gray-600">{color}</td>
@@ -868,11 +868,6 @@ export default function InventoryClient({
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{roll.location}</td>
-                      {isOwner && (
-                        <td className="px-4 py-3 text-right text-gray-700 tabular-nums text-xs">
-                          {formatCOP(roll.product.priceB2B)}
-                        </td>
-                      )}
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1.5">
                           {(roll.status === 'ACTIVE' || roll.status === 'REMNANT') && (
@@ -938,7 +933,6 @@ export default function InventoryClient({
                     {roll.disaNumber
                       ? <span className="font-bold text-gray-900 font-mono text-base">{roll.disaNumber}</span>
                       : <span className="text-gray-400 text-sm font-mono">Sin Consecutivo</span>}
-                    <span className="text-gray-400 text-xs ml-2">No. {displayRollNumber(roll.rollNumber)}</span>
                   </div>
                   <div className="flex items-center gap-1 flex-wrap justify-end">
                     {roll.hasDefect && (

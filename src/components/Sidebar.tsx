@@ -2,15 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   LayoutDashboard,
   Package,
   BookOpen,
   Users,
-  UserCog,
   ClipboardList,
-  AlertTriangle,
   LogOut,
   Receipt,
   Scissors,
@@ -36,8 +34,6 @@ const NAV: NavItem[] = [
   { href: '/inventory',        icon: Package,          label: 'Inventario',       roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
   { href: '/catalog',          icon: BookOpen,          label: 'Catálogo',         roles: ['OWNER', 'ADMIN'] },
   { href: '/clients',          icon: Users,             label: 'Clientes',         roles: ['OWNER', 'ADMIN'] },
-  { href: '/pending-defects',  icon: AlertTriangle,     label: 'Bajas pendientes', roles: ['OWNER'] },
-  { href: '/users',            icon: UserCog,           label: 'Usuarios',         roles: ['OWNER'] },
   { href: '/sales',            icon: Receipt,            label: 'Ventas',           roles: ['OWNER', 'ADMIN'] },
   { href: '/orphan-remnants', icon: Scissors,           label: 'Reman. huérfanos', roles: ['OWNER', 'ADMIN', 'WAREHOUSE'] },
   { href: '/audit',            icon: ClipboardList,     label: 'Auditoría',        roles: ['OWNER', 'ADMIN'] },
@@ -59,16 +55,6 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
-  const [pendingCount, setPendingCount] = useState(0);
-
-  // Fetch pending defect count for OWNER badge
-  useEffect(() => {
-    if (user.role !== 'OWNER') return;
-    fetch('/api/movements/pending')
-      .then(r => r.json())
-      .then(data => Array.isArray(data) && setPendingCount(data.length))
-      .catch(() => {});
-  }, [user.role]);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -101,7 +87,6 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
           {userItems.map(item => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
             const Icon = item.icon;
-            const hasBadge = item.href === '/pending-defects' && pendingCount > 0;
             return (
               <Link
                 key={item.href}
@@ -113,11 +98,6 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
               >
                 <Icon size={16} className="flex-shrink-0" />
                 <span className="flex-1">{item.label}</span>
-                {hasBadge && (
-                  <span className="bg-amber-400 text-black text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0">
-                    {pendingCount > 9 ? '9+' : pendingCount}
-                  </span>
-                )}
               </Link>
             );
           })}
@@ -159,22 +139,16 @@ export default function Sidebar({ user, drawer = false, onClose }: SidebarProps)
         {userItems.map(item => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
           const Icon = item.icon;
-          const hasBadge = item.href === '/pending-defects' && pendingCount > 0;
           return (
             <Link
               key={item.href}
               href={item.href}
-              title={hasBadge ? `${item.label} (${pendingCount} pendiente${pendingCount !== 1 ? 's' : ''})` : item.label}
+              title={item.label}
               className={`relative w-10 h-10 flex items-center justify-center rounded transition-colors ${
                 isActive ? 'bg-white text-black' : 'text-[#555] hover:text-white hover:bg-[#1A1A1A]'
               }`}
             >
               <Icon size={18} />
-              {hasBadge && (
-                <span className="absolute -top-0.5 -right-0.5 bg-amber-400 text-black text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">
-                  {pendingCount > 9 ? '9' : pendingCount}
-                </span>
-              )}
             </Link>
           );
         })}

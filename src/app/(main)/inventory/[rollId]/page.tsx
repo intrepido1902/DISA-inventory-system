@@ -112,6 +112,12 @@ export default async function RollTracePage({
   const rawMovements: any[] = movRes.data ?? [];
   const initialMeters = r.initialMeters as number;
 
+  // Detect if there is already a pending write-off/defect movement (for DefectButton warning)
+  const WRITE_OFF_TYPES = ['WRITE_OFF', 'DEFECT_DISCOUNT', 'DEFECT_REPLACEMENT'];
+  const hasPendingWriteOff = rawMovements.some(
+    (m: any) => WRITE_OFF_TYPES.includes(m.type) && m.approvalStatus === 'PENDING',
+  );
+
   let runningMeters = 0;
   const movements = rawMovements.map((m: any) => {
     if (m.type === 'ENTRY') {
@@ -186,6 +192,8 @@ export default async function RollTracePage({
                 currentDefect={Boolean(r.hasDefect)
                   ? { note: (r.defectNote ?? null) as string | null, pct: (r.defectDiscountPct ?? null) as number | null }
                   : null}
+                hasPendingWriteOff={hasPendingWriteOff}
+                userRole={session!.role}
               />
             )}
             <RollLabelButton data={{
