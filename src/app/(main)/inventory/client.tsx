@@ -745,7 +745,8 @@ export default function InventoryClient({
           <div className="relative flex-1 min-w-44">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">#</span>
             <input type="text" value={rollNumberFilter} onChange={e => setRollNumberFilter(e.target.value)}
-              placeholder="Consecutivo (No. de rollo)..."
+              placeholder="Consecutivo exacto..."
+              title="Búsqueda exacta: debe coincidir con el número de rollo completo"
               className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
           </div>
           <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}

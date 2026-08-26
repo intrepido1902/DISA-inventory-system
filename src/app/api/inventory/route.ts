@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
   const statusParam      = (sp.get('status')     ?? '').trim();          // ACTIVE|REMNANT|WRITTEN_OFF
   const isRemnantParam   = (sp.get('isRemnant')  ?? '');                 // 'true' for remnants tab
   const productIdParam   = (sp.get('productId')  ?? '');                 // direct productId (exit modal)
-  const rollNumberSearch = (sp.get('rollNumber') ?? '').trim();          // consecutivo — partial match on Roll.rollNumber
+  const rollNumberSearch = (sp.get('rollNumber') ?? '').trim();          // consecutivo — exact match on Roll.rollNumber
   const minMeters        = (sp.get('minMeters')  ?? '').trim();
   const maxMeters        = (sp.get('maxMeters')  ?? '').trim();
   const showDepleted     = sp.get('showDepleted') === 'true';            // TAREA 4: default hidden
@@ -156,10 +156,10 @@ export async function GET(request: NextRequest) {
       if (minMeters) q = q.gte('currentMeters', parseFloat(minMeters));
       if (maxMeters) q = q.lte('currentMeters', parseFloat(maxMeters));
 
-      // Consecutivo search — partial match on Roll.rollNumber only. Independent from the
-      // reference (Product.code) filter above — the two are never combined.
+      // Consecutivo search — exact match on Roll.rollNumber (unique per roll, never partial).
+      // Independent from the reference (Product.code) filter above — the two are never combined.
       if (rollNumberSearch) {
-        q = q.ilike('rollNumber', `%${rollNumberSearch}%`);
+        q = q.eq('rollNumber', rollNumberSearch);
       }
 
       return q;
