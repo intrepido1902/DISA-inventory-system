@@ -1,5 +1,6 @@
 import { getSession } from '@/lib/session';
 import { db } from '@/lib/db';
+import { buildCodeFilter } from '@/lib/productFamily';
 import InventoryClient from './client';
 
 const ROLL_SELECT = `
@@ -46,7 +47,7 @@ async function getInventoryData(isRemnantTab: boolean, search = '') {
   // Pre-compute product IDs matching search (reference code filter)
   let searchProductIds: number[] | null = null;
   if (search) {
-    const { data: pRows } = await db.from('Product').select('id').ilike('code', `%${search}%`);
+    const { data: pRows } = await db.from('Product').select('id').or(buildCodeFilter(search));
     searchProductIds = (pRows ?? []).map((p: any) => p.id as number);
   }
 

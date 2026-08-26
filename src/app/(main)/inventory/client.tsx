@@ -837,8 +837,8 @@ export default function InventoryClient({
                   return (
                     <tr key={roll.id} className="border-b border-[#F5F5F5] hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-sm">
-                        {roll.disaNumber
-                          ? <span className="font-bold text-gray-900">{roll.disaNumber}</span>
+                        {roll.rollNumber
+                          ? <span className="font-bold text-gray-900">{displayRollNumber(roll.rollNumber)}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold text-gray-700">{ref}</td>
@@ -930,8 +930,8 @@ export default function InventoryClient({
               <div key={roll.id} className="bg-white rounded-lg border border-[#E5E5E5] p-4">
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    {roll.disaNumber
-                      ? <span className="font-bold text-gray-900 font-mono text-base">{roll.disaNumber}</span>
+                    {roll.rollNumber
+                      ? <span className="font-bold text-gray-900 font-mono text-base">{displayRollNumber(roll.rollNumber)}</span>
                       : <span className="text-gray-400 text-sm font-mono">Sin Consecutivo</span>}
                   </div>
                   <div className="flex items-center gap-1 flex-wrap justify-end">
@@ -1058,7 +1058,7 @@ export default function InventoryClient({
                           <button key={r.id} type="button" onClick={() => toggleRoll(r)}
                             className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs mt-1.5 hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${isSelected ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
                             <span className={`col-span-1 text-center text-base ${isSelected ? 'text-gray-900' : 'text-gray-200'}`}>✓</span>
-                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{r.disaNumber ?? '—'}</span>
+                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{displayRollNumber(r.rollNumber)}</span>
                             <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
                             <span className="col-span-3 text-gray-500 truncate">{color}</span>
                             <span className="col-span-3 text-right">
@@ -1084,7 +1084,7 @@ export default function InventoryClient({
                           <button key={r.id} type="button" onClick={() => toggleRoll(r)}
                             className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs mt-1.5 hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${isSelected ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
                             <span className={`col-span-1 text-center text-base ${isSelected ? 'text-gray-900' : 'text-gray-200'}`}>✓</span>
-                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{r.disaNumber ?? '—'}</span>
+                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{displayRollNumber(r.rollNumber)}</span>
                             <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
                             <span className="col-span-3 text-gray-500 truncate">{color}</span>
                             <span className="col-span-3 text-right">

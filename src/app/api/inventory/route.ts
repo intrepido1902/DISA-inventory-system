@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
 import { db } from '@/lib/db';
-import { getFamilyOrFilter, type ProductFamily } from '@/lib/productFamily';
+import { getFamilyOrFilter, buildCodeFilter, type ProductFamily } from '@/lib/productFamily';
 
 const ROLL_SELECT = `
   id, rollNumber, barcode, disaNumber, initialMeters, currentMeters,
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 
   // ── Filter params ────────────────────────────────────────────────────────────
   // Product-level filters
-  const search       = (sp.get('search')   ?? '').trim();   // consecutivo / reference text
+  const search       = (sp.get('search')   ?? '').trim();   // reference text (Product.code, family-aware)
   const familyParam  = (sp.get('family')   ?? '').trim();   // 'LSFH' | 'AS'
   const categoryFilter = (sp.get('category') ?? '').trim(); // backward compat (1=Velo, 2=Blackout)
   const colorFilter  = (sp.get('color')    ?? '').trim();   // exact Product.color match
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
   const statusParam      = (sp.get('status')     ?? '').trim();          // ACTIVE|REMNANT|WRITTEN_OFF
   const isRemnantParam   = (sp.get('isRemnant')  ?? '');                 // 'true' for remnants tab
   const productIdParam   = (sp.get('productId')  ?? '');                 // direct productId (exit modal)
-  const rollNumberSearch = (sp.get('rollNumber') ?? '').trim();          // partial match on rollNumber/disaNumber
+  const rollNumberSearch = (sp.get('rollNumber') ?? '').trim();          // consecutivo — partial match on Roll.rollNumber
   const minMeters        = (sp.get('minMeters')  ?? '').trim();
   const maxMeters        = (sp.get('maxMeters')  ?? '').trim();
   const showDepleted     = sp.get('showDepleted') === 'true';            // TAREA 4: default hidden
@@ -120,9 +120,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Reference text search — Product.code only (consecutivo has its own dedicated field/param below)
+    // Reference text search — Product.code only, expanded via buildCodeFilter to recognize
+    // family shorthand (e.g. "lsfh"/"23" or "as"/"22"). Consecutivo has its own dedicated
+    // field/param below — the two never mix.
     if (search) {
-      const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').ilike('code', `%${search}%`);
+      const { data: pRows, error: pErr } = await (db as any).from('Product').select('id').or(buildCodeFilter(search));
       if (pErr) { console.error('[inventory] search (product.code) error:', pErr); throw pErr; }
       const searchIds = (pRows ?? []).map((p: any) => p.id as number);
       if (!intersectProductIds(searchIds)) return EMPTY;
@@ -154,9 +156,10 @@ export async function GET(request: NextRequest) {
       if (minMeters) q = q.gte('currentMeters', parseFloat(minMeters));
       if (maxMeters) q = q.lte('currentMeters', parseFloat(maxMeters));
 
-      // Consecutivo search — partial match on rollNumber OR disaNumber (the unique per-roll identifier)
+      // Consecutivo search — partial match on Roll.rollNumber only. Independent from the
+      // reference (Product.code) filter above — the two are never combined.
       if (rollNumberSearch) {
-        q = q.or(`rollNumber.ilike.%${rollNumberSearch}%,disaNumber.ilike.%${rollNumberSearch}%`);
+        q = q.ilike('rollNumber', `%${rollNumberSearch}%`);
       }
 
       return q;

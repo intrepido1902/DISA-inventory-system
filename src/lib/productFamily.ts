@@ -36,3 +36,23 @@ export function getFamilyOrFilter(family: ProductFamily): string {
   if (family === 'LSFH') return 'code.ilike.LSFH%,code.ilike.23%';
   return 'code.ilike.AS%,code.ilike.22%';
 }
+
+/**
+ * Expands a free-text reference search term into a Supabase `.or()` filter expression
+ * on Product.code, recognizing family shorthand so e.g. "lsfh" or "23" match the whole
+ * LSFH family instead of only codes containing that literal substring.
+ *
+ * Usage:
+ *   const { data } = await db.from('Product').select('id').or(buildCodeFilter(term));
+ *
+ *   "lsfh" / "LSFH2306" / "23..." → code ILIKE 'LSFH%' OR code ILIKE '23%'
+ *   "as"   / "AS2242"   / "22..." → code ILIKE 'AS%'   OR code ILIKE '22%'
+ *   anything else                 → code ILIKE '%{term}%'
+ */
+export function buildCodeFilter(term: string): string {
+  const t = term.trim();
+  const lower = t.toLowerCase();
+  if (lower.includes('lsfh') || t.startsWith('23')) return getFamilyOrFilter('LSFH');
+  if (lower.includes('as') || t.startsWith('22')) return getFamilyOrFilter('AS');
+  return `code.ilike.%${t}%`;
+}
