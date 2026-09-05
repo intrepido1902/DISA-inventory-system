@@ -325,7 +325,7 @@ export default function AuditClient({
                 <th className="px-4 py-3 text-left">Acción</th>
                 <th className="px-4 py-3 text-left">Entidad</th>
                 <th className="px-4 py-3 text-left">Cliente</th>
-                <th className="px-4 py-3 text-right">Valor total</th>
+                <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3 text-left">Antes</th>
                 <th className="px-4 py-3 text-left">Después</th>
                 <th className="px-4 py-3 text-left">Acciones</th>

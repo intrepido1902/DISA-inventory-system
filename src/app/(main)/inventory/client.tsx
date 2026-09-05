@@ -877,7 +877,7 @@ export default function InventoryClient({
                 <th className="px-4 py-3 text-left">Ancho</th>
                 <th className="px-4 py-3 text-left">Metros</th>
                 <th className="px-4 py-3 text-left">Estado</th>
-                <th className="px-4 py-3 text-left">Ubicación</th>
+                <th className="px-4 py-3 text-left">No Rollo</th>
                 <th className="px-4 py-3 text-center">Acciones</th>
               </tr>
             </thead>
@@ -928,7 +928,7 @@ export default function InventoryClient({
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">{roll.location}</td>
+                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">{roll.disaNumber ?? '—'}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1.5">
                           {(roll.status === 'ACTIVE' || roll.status === 'REMNANT') && (
@@ -1023,7 +1023,7 @@ export default function InventoryClient({
                     </span>
                     <span className="text-xs text-gray-400">/ {roll.initialMeters}m</span>
                   </div>
-                  <span className="text-xs text-gray-400 font-mono">{roll.location}</span>
+                  <span className="text-xs text-gray-400 font-mono">No Rollo: {roll.disaNumber ?? '—'}</span>
                 </div>
                 <div className="flex gap-2 mt-3">
                   {(roll.status === 'ACTIVE' || roll.status === 'REMNANT') && (

@@ -14,13 +14,25 @@ export interface AuditLogEnrichment {
   voided: boolean;
 }
 
+interface MovementCandidate {
+  createdAt: number;
+  reverted: boolean;
+  clientName: string | null;
+  saleTotal: number | null;
+}
+
 /**
- * For EXIT_FULL / EXIT_PARTIAL AuditLog rows, `entityId` is the rollId (not the movementId —
- * see ReprintButtons in audit/client.tsx) and `createdAt` matches the originating Movement's
- * `createdAt` exactly, because /api/inventory/exit writes the Roll update, the Movement row and
- * the AuditLog row using the same `Date.now()` value. That lets us join back to
- * Movement → Sale (for the client name + collected value) and read Movement.reverted (to know
- * whether this exit has since been voided) without any schema changes.
+ * AuditLog does not store clientName/total for EXIT_FULL / EXIT_PARTIAL rows — that data lives
+ * on the Sale record. For these actions `entityId` is the rollId (not the movementId — see
+ * ReprintButtons in audit/client.tsx), so we join Movement (rollId = entityId) → Sale
+ * (Movement.saleId = Sale.id) to recover Sale.clientName and Sale.total, and read
+ * Movement.reverted to know whether the exit has since been voided (no schema changes needed).
+ *
+ * A roll can have been sold more than once over its lifetime, so a rollId alone doesn't uniquely
+ * identify the Movement — we disambiguate by picking, among all EXIT movements for that roll,
+ * the one whose createdAt is closest to the AuditLog row's createdAt (in practice this is an
+ * exact match, since /api/inventory/exit writes the Roll update, the Movement row and the
+ * AuditLog row using the same Date.now() value for a given request).
  */
 export async function enrichAuditLogs<T extends AuditLogBase>(
   logs: T[],
@@ -29,28 +41,28 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
     logs.filter(l => EXIT_ACTIONS.has(l.action)).map(l => l.entityId)
   )];
 
-  const movMap = new Map<string, AuditLogEnrichment>();
+  const candidatesByRoll = new Map<number, MovementCandidate[]>();
 
   if (exitRollIds.length > 0) {
     const dbAny = db as any;
     const { data: movs, error } = await dbAny
       .from('Movement')
-      .select('rollId, meters, pricePerMeter, discount, total, createdAt, reverted, sale:saleId(clientName)')
+      .select('rollId, createdAt, reverted, sale:saleId(clientName, total)')
       .in('rollId', exitRollIds)
       .in('type', ['EXIT_FULL', 'EXIT_PARTIAL']);
 
-    if (error) console.error('[auditEnrich] Movement join error:', error);
+    if (error) console.error('[auditEnrich] Movement/Sale join error:', error);
 
     for (const m of movs ?? []) {
-      const meters = Number(m.meters) || 0;
-      const pricePerMeter = Number(m.pricePerMeter) || 0;
-      const discount = Number(m.discount) || 0;
-      const total = m.total != null ? Number(m.total) : meters * pricePerMeter * (1 - discount / 100);
-      movMap.set(`${m.rollId}_${m.createdAt}`, {
+      const rollId = m.rollId as number;
+      const list = candidatesByRoll.get(rollId) ?? [];
+      list.push({
+        createdAt: m.createdAt as number,
+        reverted: Boolean(m.reverted),
         clientName: m.sale?.clientName ?? null,
-        saleTotal: total,
-        voided: Boolean(m.reverted),
+        saleTotal: m.sale?.total != null ? Number(m.sale.total) : null,
       });
+      candidatesByRoll.set(rollId, list);
     }
   }
 
@@ -58,12 +70,20 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
     if (!EXIT_ACTIONS.has(l.action)) {
       return { ...l, clientName: null, saleTotal: null, voided: false };
     }
-    const match = movMap.get(`${l.entityId}_${l.createdAt}`);
+
+    const candidates = candidatesByRoll.get(l.entityId) ?? [];
+    let best: MovementCandidate | null = null;
+    let bestDiff = Infinity;
+    for (const c of candidates) {
+      const diff = Math.abs(c.createdAt - l.createdAt);
+      if (diff < bestDiff) { bestDiff = diff; best = c; }
+    }
+
     return {
       ...l,
-      clientName: match?.clientName ?? null,
-      saleTotal: match?.saleTotal ?? null,
-      voided: match?.voided ?? false,
+      clientName: best?.clientName ?? null,
+      saleTotal: best?.saleTotal ?? null,
+      voided: best?.reverted ?? false,
     };
   });
 }
