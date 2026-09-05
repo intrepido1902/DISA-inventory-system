@@ -2,6 +2,7 @@ import { getSession } from '@/lib/session';
 import { canSeeCatalog, type Role } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
+import { enrichAuditLogs } from '@/lib/auditEnrich';
 import AuditClient from './client';
 
 async function getAuditData() {
@@ -13,18 +14,20 @@ async function getAuditData() {
     db.from('User').select('id, name').order('name', { ascending: true }),
   ]);
 
+  const rawLogs = (logsRes.data ?? []).map((l: any) => ({
+    id: l.id as number,
+    action: l.action as string,
+    entity: l.entity as string,
+    entityId: l.entityId as number,
+    oldData: l.oldData as string | null,
+    newData: l.newData as string | null,
+    createdAt: l.createdAt as number,
+    userName: l.user?.name as string ?? '',
+    userEmail: l.user?.email as string ?? '',
+  }));
+
   return {
-    logs: (logsRes.data ?? []).map((l: any) => ({
-      id: l.id as number,
-      action: l.action as string,
-      entity: l.entity as string,
-      entityId: l.entityId as number,
-      oldData: l.oldData as string | null,
-      newData: l.newData as string | null,
-      createdAt: l.createdAt as number,
-      userName: l.user?.name as string ?? '',
-      userEmail: l.user?.email as string ?? '',
-    })),
+    logs: await enrichAuditLogs(rawLogs),
     users: (usersRes.data ?? []).map((r: any) => ({ id: r.id as number, name: r.name as string })),
   };
 }

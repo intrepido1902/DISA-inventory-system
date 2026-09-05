@@ -92,7 +92,7 @@ function baseRef(code: string): string {
 function updateUrl(filters: Record<string, string>) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
-  ['q', 'cat', 'family', 'status', 'color', 'width', 'rollNum', 'minM', 'maxM', 'depleted', 'p']
+  ['q', 'cat', 'family', 'status', 'color', 'width', 'rollNum', 'disaNum', 'minM', 'maxM', 'depleted', 'p']
     .forEach(k => url.searchParams.delete(k));
   Object.entries(filters).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
   window.history.replaceState({}, '', url.toString());
@@ -138,7 +138,7 @@ export default function InventoryClient({
   initialTab = 'all', openExitModal = false,
   initialSearch = '', initialFamily = '', initialStatus = '',
   initialColor = '', initialWidth = '', initialMinMeters = '', initialMaxMeters = '',
-  initialRollNumber = '', initialShowDepleted = false,
+  initialRollNumber = '', initialDisaNumber = '', initialShowDepleted = false,
 }: {
   initialRolls: Roll[];
   initialTotal: number;
@@ -161,6 +161,7 @@ export default function InventoryClient({
   initialMinMeters?: string;
   initialMaxMeters?: string;
   initialRollNumber?: string;
+  initialDisaNumber?: string;
   initialShowDepleted?: boolean;
 }) {
   const router = useRouter();
@@ -181,6 +182,7 @@ export default function InventoryClient({
   const [colorFilter, setColorFilter] = useState(initialColor);
   const [widthFilter, setWidthFilter] = useState(initialWidth);
   const [rollNumberFilter, setRollNumberFilter] = useState(initialRollNumber);
+  const [disaNumberFilter, setDisaNumberFilter] = useState(initialDisaNumber);
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [minMeters, setMinMeters] = useState(initialMinMeters);
   const [maxMeters, setMaxMeters] = useState(initialMaxMeters);
@@ -189,6 +191,7 @@ export default function InventoryClient({
   // Debounced versions of text inputs
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
   const [debouncedRollNumber, setDebouncedRollNumber] = useState(initialRollNumber);
+  const [debouncedDisaNumber, setDebouncedDisaNumber] = useState(initialDisaNumber);
   const [debouncedMinM, setDebouncedMinM] = useState(initialMinMeters);
   const [debouncedMaxM, setDebouncedMaxM] = useState(initialMaxMeters);
 
@@ -253,7 +256,7 @@ export default function InventoryClient({
 
   const activeFilterCount = [
     search, familyFilter, colorFilter, widthFilter,
-    statusFilter, debouncedRollNumber, debouncedMinM, debouncedMaxM,
+    statusFilter, debouncedRollNumber, debouncedDisaNumber, debouncedMinM, debouncedMaxM,
     showDepleted ? 'depleted' : '',
   ].filter(Boolean).length;
   const remnantCount = initialRemnantCount;
@@ -306,19 +309,20 @@ export default function InventoryClient({
     const t = setTimeout(() => {
       setDebouncedSearch(search);
       setDebouncedRollNumber(rollNumberFilter);
+      setDebouncedDisaNumber(disaNumberFilter);
       setDebouncedMinM(minMeters);
       setDebouncedMaxM(maxMeters);
       setServerPage(1);
     }, 300);
     return () => clearTimeout(t);
-  }, [search, rollNumberFilter, minMeters, maxMeters]);
+  }, [search, rollNumberFilter, disaNumberFilter, minMeters, maxMeters]);
 
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
       // Skip first fetch when all filters are default (SSR data is sufficient)
       const allDefault = serverPage === 1 && tab === 'all' && !debouncedSearch && !familyFilter &&
-        !colorFilter && !widthFilter && !statusFilter && !debouncedRollNumber &&
+        !colorFilter && !widthFilter && !statusFilter && !debouncedRollNumber && !debouncedDisaNumber &&
         !debouncedMinM && !debouncedMaxM && !showDepleted;
       if (allDefault) return;
     }
@@ -331,6 +335,7 @@ export default function InventoryClient({
     if (widthFilter) params.set('width', widthFilter);
     if (statusFilter) params.set('status', statusFilter);
     if (debouncedRollNumber) params.set('rollNumber', debouncedRollNumber);
+    if (debouncedDisaNumber) params.set('disaNumber', debouncedDisaNumber);
     if (debouncedMinM) params.set('minMeters', debouncedMinM);
     if (debouncedMaxM) params.set('maxMeters', debouncedMaxM);
     if (showDepleted) params.set('showDepleted', 'true');
@@ -349,7 +354,7 @@ export default function InventoryClient({
       .finally(() => setIsFetching(false));
     return () => ctrl.abort();
   }, [serverPage, tab, familyFilter, colorFilter, widthFilter, statusFilter, showDepleted,
-      debouncedSearch, debouncedRollNumber, debouncedMinM, debouncedMaxM]);
+      debouncedSearch, debouncedRollNumber, debouncedDisaNumber, debouncedMinM, debouncedMaxM]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -360,6 +365,7 @@ export default function InventoryClient({
         width: widthFilter,
         status: statusFilter,
         rollNum: rollNumberFilter,
+        disaNum: disaNumberFilter,
         minM: minMeters,
         maxM: maxMeters,
         depleted: showDepleted ? 'true' : '',
@@ -367,7 +373,7 @@ export default function InventoryClient({
       });
     }, 350);
     return () => clearTimeout(t);
-  }, [search, familyFilter, colorFilter, widthFilter, statusFilter, rollNumberFilter, minMeters, maxMeters, showDepleted, serverPage]);
+  }, [search, familyFilter, colorFilter, widthFilter, statusFilter, rollNumberFilter, disaNumberFilter, minMeters, maxMeters, showDepleted, serverPage]);
 
   // Fetch prices for all selected rolls when client or selection changes
   useEffect(() => {
@@ -441,10 +447,11 @@ export default function InventoryClient({
 
   function clearFilters() {
     setSearch(''); setFamilyFilter(''); setColorFilter(''); setWidthFilter('');
-    setRollNumberFilter(''); setStatusFilter(''); setMinMeters(''); setMaxMeters('');
+    setRollNumberFilter(''); setDisaNumberFilter(''); setStatusFilter(''); setMinMeters(''); setMaxMeters('');
     setShowDepleted(false);
     // Flush debounced values immediately so the fetch uses empty filters
-    setDebouncedSearch(''); setDebouncedRollNumber(''); setDebouncedMinM(''); setDebouncedMaxM('');
+    setDebouncedSearch(''); setDebouncedRollNumber(''); setDebouncedDisaNumber('');
+    setDebouncedMinM(''); setDebouncedMaxM('');
     setServerPage(1);
     updateUrl({});
   }
@@ -793,6 +800,13 @@ export default function InventoryClient({
             <input type="text" value={rollNumberFilter} onChange={e => setRollNumberFilter(e.target.value)}
               placeholder="Consecutivo exacto..."
               title="Búsqueda exacta: debe coincidir con el número de rollo completo"
+              className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
+          </div>
+          <div className="relative flex-1 min-w-44">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">G</span>
+            <input type="text" value={disaNumberFilter} onChange={e => setDisaNumberFilter(e.target.value)}
+              placeholder="Rollo No. (disaNumber)..."
+              title="Búsqueda parcial por Rollo No. (columna G del Excel) — distinto del consecutivo"
               className="w-full pl-9 pr-4 py-2 bg-white border border-[#E5E5E5] rounded text-sm focus:outline-none focus:border-gray-400" autoComplete="off" />
           </div>
           <select value={colorFilter} onChange={e => { setColorFilter(e.target.value); setServerPage(1); }}

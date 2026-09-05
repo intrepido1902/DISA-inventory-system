@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
   const isRemnantParam   = (sp.get('isRemnant')  ?? '');                 // 'true' for remnants tab
   const productIdParam   = (sp.get('productId')  ?? '');                 // direct productId (exit modal)
   const rollNumberSearch = (sp.get('rollNumber') ?? '').trim();          // consecutivo — exact match on Roll.rollNumber
+  const disaNumberSearch = (sp.get('disaNumber') ?? '').trim();          // Rollo No. (columna G Excel) — partial match on Roll.disaNumber
   const minMeters        = (sp.get('minMeters')  ?? '').trim();
   const maxMeters        = (sp.get('maxMeters')  ?? '').trim();
   const showDepleted     = sp.get('showDepleted') === 'true';            // TAREA 4: default hidden
@@ -162,6 +163,12 @@ export async function GET(request: NextRequest) {
         q = q.eq('rollNumber', rollNumberSearch);
       }
 
+      // Rollo No. (Roll.disaNumber, columna G del Excel) — partial match, independent field
+      // from both the consecutivo (rollNumber) and the reference (Product.code) filters.
+      if (disaNumberSearch) {
+        q = q.ilike('disaNumber', `%${disaNumberSearch}%`);
+      }
+
       return q;
     }
 
@@ -170,7 +177,7 @@ export async function GET(request: NextRequest) {
     dataQuery = applyRollFilters(dataQuery);
 
     // TAREA 2: sort by currentMeters ASC when searching by reference; else by id ASC
-    if (search || rollNumberSearch) {
+    if (search || rollNumberSearch || disaNumberSearch) {
       dataQuery = dataQuery.order('currentMeters', { ascending: true });
     } else {
       dataQuery = dataQuery.order('id', { ascending: true });

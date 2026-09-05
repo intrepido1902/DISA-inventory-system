@@ -139,6 +139,7 @@ export default async function InventoryPage({
     minM?: string;
     maxM?: string;
     rollNum?: string;
+    disaNum?: string;
     depleted?: string;
     loc?: string;
   }>;
@@ -171,6 +172,7 @@ export default async function InventoryPage({
       initialMinMeters={sp.minM ?? ''}
       initialMaxMeters={sp.maxM ?? ''}
       initialRollNumber={sp.rollNum ?? ''}
+      initialDisaNumber={sp.disaNum ?? ''}
       initialShowDepleted={sp.depleted === 'true'}
     />
   );

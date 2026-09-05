@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { formatColombianDate } from '@/lib/dateUtils';
 import { ACTION_LABELS, ACTION_COLORS, formatAuditData } from '@/lib/auditLabels';
 import { generateSalePDF, type SalePDFData } from '@/lib/generateSalePDF';
@@ -11,8 +12,22 @@ interface AuditLog {
   id: number; action: string; entity: string; entityId: number;
   oldData: string | null; newData: string | null; createdAt: number;
   userName: string; userEmail: string;
+  // TAREA: Cliente + Valor total for EXIT_FULL/EXIT_PARTIAL rows (joined server-side via
+  // enrichAuditLogs — see src/lib/auditEnrich.ts), plus whether the underlying Movement
+  // has since been anulado (voided).
+  clientName: string | null;
+  saleTotal: number | null;
+  voided: boolean;
 }
 interface User { id: number; name: string }
+
+function formatCOP(n: number) {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n);
+}
+
+function isExitAction(action: string): boolean {
+  return action === 'EXIT_FULL' || action === 'EXIT_PARTIAL';
+}
 
 // ── Reprint helpers ───────────────────────────────────────────────────────────
 const STATUS_LBL: Record<string, string> = {
@@ -190,6 +205,7 @@ const FILTER_GROUPS = [
     label: 'Otros',
     options: [
       { value: 'CREATE_CLIENT', label: 'Cliente creado' },
+      { value: 'VOID_MOVEMENT', label: 'Movimiento anulado' },
     ],
   },
 ];
@@ -199,11 +215,50 @@ export default function AuditClient({
 }: {
   logs: AuditLog[]; users: User[]; userRole: string;
 }) {
+  const router = useRouter();
   const isOwner = userRole === 'OWNER';
+  const canVoid = userRole === 'OWNER' || userRole === 'ADMIN';
   const [actionFilter, setActionFilter] = useState('');
   const [userFilter, setUserFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+
+  // ── Anular movimiento (TAREA 2) ──────────────────────────────────────────
+  const [voidTarget, setVoidTarget] = useState<AuditLog | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
+  const [voidError, setVoidError] = useState('');
+
+  function openVoidModal(log: AuditLog) {
+    setVoidTarget(log);
+    setVoidReason('');
+    setVoidError('');
+  }
+
+  async function handleVoid() {
+    if (!voidTarget) return;
+    const reason = voidReason.trim();
+    if (reason.length < 10) {
+      setVoidError('La razón debe tener al menos 10 caracteres');
+      return;
+    }
+    setVoiding(true); setVoidError('');
+    try {
+      const res = await fetch('/api/audit/void', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rollId: voidTarget.entityId, createdAt: voidTarget.createdAt, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setVoidError(data.error ?? 'Error al anular movimiento'); return; }
+      setVoidTarget(null);
+      router.refresh();
+    } catch {
+      setVoidError('Error de conexión');
+    } finally {
+      setVoiding(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     return logs.filter(l => {
@@ -262,59 +317,139 @@ export default function AuditClient({
 
       <div className="bg-white rounded-lg border border-[#E5E5E5] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
+          <table className="w-full text-sm min-w-[1000px]">
             <thead>
               <tr className="border-b border-[#E5E5E5] text-xs text-gray-500 uppercase tracking-wide bg-gray-50">
                 <th className="px-4 py-3 text-left">Fecha / Hora</th>
                 <th className="px-4 py-3 text-left">Usuario</th>
                 <th className="px-4 py-3 text-left">Acción</th>
                 <th className="px-4 py-3 text-left">Entidad</th>
+                <th className="px-4 py-3 text-left">Cliente</th>
+                <th className="px-4 py-3 text-right">Valor total</th>
                 <th className="px-4 py-3 text-left">Antes</th>
                 <th className="px-4 py-3 text-left">Después</th>
-                <th className="px-4 py-3 text-left">Reimprimir</th>
+                <th className="px-4 py-3 text-left">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-12 text-center text-gray-400">
                     No hay registros de auditoría
                   </td>
                 </tr>
               ) : (
-                filtered.map(log => (
-                  <tr key={log.id} className="border-b border-[#F5F5F5] hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-500 text-xs tabular-nums whitespace-nowrap">
-                      {formatColombianDate(log.createdAt)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-gray-900 text-xs font-medium">{log.userName}</div>
-                      <div className="text-gray-400 text-xs">{log.userEmail}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${ACTION_COLORS[log.action] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {ACTION_LABELS[log.action] ?? log.action}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 text-xs font-mono">
-                      {log.entity} #{log.entityId}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-52">
-                      {formatAuditData(log.oldData, users)}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-700 max-w-52">
-                      {formatAuditData(log.newData, users)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ReprintButtons log={log} isOwner={isOwner} />
-                    </td>
-                  </tr>
-                ))
+                filtered.map(log => {
+                  const exit = isExitAction(log.action);
+                  const isVoidRow = log.action === 'VOID_MOVEMENT';
+                  let voidReasonText: string | null = null;
+                  if (isVoidRow && log.newData) {
+                    try { voidReasonText = (JSON.parse(log.newData) as { reason?: string }).reason ?? null; } catch { /* ignore */ }
+                  }
+                  return (
+                    <tr key={log.id} className={`border-b border-[#F5F5F5] hover:bg-gray-50 ${exit && log.voided ? 'opacity-60' : ''}`}>
+                      <td className="px-4 py-3 text-gray-500 text-xs tabular-nums whitespace-nowrap">
+                        {formatColombianDate(log.createdAt)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-gray-900 text-xs font-medium">{log.userName}</div>
+                        <div className="text-gray-400 text-xs">{log.userEmail}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${ACTION_COLORS[log.action] ?? 'bg-gray-100 text-gray-600'}`}>
+                          {ACTION_LABELS[log.action] ?? log.action}
+                        </span>
+                        {exit && log.voided && (
+                          <span className="ml-1 inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-red-200 text-red-800">
+                            ANULADO
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs font-mono">
+                        {log.entity} #{log.entityId}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-700">
+                        {exit ? (log.clientName ?? '—') : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-700 text-right tabular-nums">
+                        {exit && log.saleTotal != null ? formatCOP(log.saleTotal) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500 max-w-52">
+                        {formatAuditData(log.oldData, users)}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-700 max-w-52">
+                        {isVoidRow ? (
+                          <div>
+                            <div className="text-red-600 font-semibold">ANULADO</div>
+                            {voidReasonText && (
+                              <div className="text-gray-500 mt-0.5">Motivo: {voidReasonText}</div>
+                            )}
+                          </div>
+                        ) : formatAuditData(log.newData, users)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <ReprintButtons log={log} isOwner={isOwner} />
+                          {exit && canVoid && !log.voided && (
+                            <button
+                              onClick={() => openVoidModal(log)}
+                              className="text-xs text-red-600 hover:text-red-800 border border-red-200 hover:border-red-400 bg-red-50 hover:bg-red-100 rounded px-2 py-0.5 transition-colors whitespace-nowrap"
+                            >
+                              ⛔ Anular
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Anular movimiento — modal (TAREA 2) */}
+      {voidTarget && (
+        <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4" onClick={() => setVoidTarget(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Anular movimiento</h2>
+            <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm space-y-1">
+              <div><span className="text-gray-400">Entidad: </span><span className="font-mono">{voidTarget.entity} #{voidTarget.entityId}</span></div>
+              <div><span className="text-gray-400">Cliente: </span>{voidTarget.clientName ?? '—'}</div>
+              <div><span className="text-gray-400">Valor: </span>{voidTarget.saleTotal != null ? formatCOP(voidTarget.saleTotal) : '—'}</div>
+              <div><span className="text-gray-400">Fecha: </span>{formatColombianDate(voidTarget.createdAt)}</div>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Se restaurarán los metros vendidos al rollo (y su estado se recalculará) y se registrará una nueva entrada de auditoría de anulación. El registro original no se modifica.
+            </p>
+            <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
+              Razón de anulación (mínimo 10 caracteres) *
+            </label>
+            <textarea
+              value={voidReason}
+              onChange={e => setVoidReason(e.target.value)}
+              rows={3}
+              placeholder="Explica el motivo de la anulación..."
+              className="w-full border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400 mb-1"
+            />
+            <p className="text-[11px] text-gray-400 mb-3">{voidReason.trim().length}/10 caracteres mínimo</p>
+            {voidError && (
+              <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded px-3 py-2 mb-3">{voidError}</p>
+            )}
+            <div className="flex gap-3">
+              <button onClick={() => setVoidTarget(null)}
+                className="flex-1 border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">
+                Cancelar
+              </button>
+              <button onClick={handleVoid} disabled={voiding || voidReason.trim().length < 10}
+                className="flex-1 bg-red-600 text-white rounded px-4 py-2.5 text-sm font-medium hover:bg-red-700 disabled:opacity-50">
+                {voiding ? 'Anulando...' : 'Confirmar anulación'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

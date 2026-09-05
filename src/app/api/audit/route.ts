@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
 import { canSeeCatalog, type Role } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { enrichAuditLogs } from '@/lib/auditEnrich';
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     if (logsRes.error) throw logsRes.error;
 
-    const logs = (logsRes.data ?? []).map((l: any) => ({
+    const rawLogs = (logsRes.data ?? []).map((l: any) => ({
       id: l.id,
       action: l.action,
       entity: l.entity,
@@ -45,6 +46,8 @@ export async function GET(request: NextRequest) {
       userName: l.user?.name ?? '',
       userEmail: l.user?.email ?? '',
     }));
+
+    const logs = await enrichAuditLogs(rawLogs);
 
     return Response.json({ logs, users: usersRes.data ?? [] });
   } catch (err) {

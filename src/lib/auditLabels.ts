@@ -17,6 +17,7 @@ export const ACTION_LABELS: Record<string, string> = {
   DEFECT_REPLACEMENT_REJECTED: 'Reposición rechazada',
   DEFECT_CLEARED: 'Marca de defecto eliminada',
   CREATE_CLIENT: 'Cliente creado',
+  VOID_MOVEMENT: 'Movimiento anulado',
 };
 
 export const ACTION_COLORS: Record<string, string> = {
@@ -38,6 +39,7 @@ export const ACTION_COLORS: Record<string, string> = {
   DEFECT_REPLACEMENT_REJECTED: 'bg-red-100 text-red-700',
   DEFECT_CLEARED: 'bg-green-100 text-green-700',
   CREATE_CLIENT: 'bg-blue-100 text-blue-700',
+  VOID_MOVEMENT: 'bg-red-200 text-red-800',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -62,6 +64,10 @@ const FIELD_LABELS: Record<string, string> = {
   defectNote: 'Nota de defecto',
   defectDiscountPct: 'Descuento por defecto',
   rejectionComment: 'Motivo de rechazo',
+  reason: 'Motivo de anulación',
+  reverted: 'Anulado',
+  voidedMovementId: 'Movimiento anulado',
+  voidedRollId: 'Rollo',
 };
 
 const VALUE_LABELS: Record<string, string> = {
