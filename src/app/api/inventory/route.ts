@@ -163,10 +163,10 @@ export async function GET(request: NextRequest) {
         q = q.eq('rollNumber', rollNumberSearch);
       }
 
-      // Rollo No. (Roll.disaNumber, columna G del Excel) — partial match, independent field
+      // Rollo No. (Roll.disaNumber, columna G del Excel) — exact match, independent field
       // from both the consecutivo (rollNumber) and the reference (Product.code) filters.
       if (disaNumberSearch) {
-        q = q.ilike('disaNumber', `%${disaNumberSearch}%`);
+        q = q.eq('disaNumber', disaNumberSearch);
       }
 
       return q;
