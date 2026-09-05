@@ -50,7 +50,7 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
     const dbAny = db as any;
     const { data: movs, error } = await dbAny
       .from('Movement')
-      .select('rollId, createdAt, reverted, sale:saleId(clientName, total)')
+      .select('rollId, createdAt, sale:saleId(clientName, total)')
       .in('rollId', exitRollIds)
       .in('type', ['EXIT_FULL', 'EXIT_PARTIAL']);
 
