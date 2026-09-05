@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     if (logsRes.error) throw logsRes.error;
 
-    const rawLogs = (logsRes.data ?? []).map((l: any) => ({
+    const logs = (logsRes.data ?? []).map((l: any) => ({
       id: l.id,
       action: l.action,
       entity: l.entity,
@@ -47,9 +47,9 @@ export async function GET(request: NextRequest) {
       userEmail: l.user?.email ?? '',
     }));
 
-    const logs = await enrichAuditLogs(rawLogs);
+    const enriched = await enrichAuditLogs(logs);
 
-    return Response.json({ logs, users: usersRes.data ?? [] });
+    return Response.json({ logs: enriched, users: usersRes.data ?? [] });
   } catch (err) {
     console.error('GET /api/audit error:', err);
     return Response.json({ error: 'Error al obtener auditoría' }, { status: 500 });
