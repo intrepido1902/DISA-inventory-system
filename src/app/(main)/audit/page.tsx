@@ -26,8 +26,11 @@ async function getAuditData() {
     userEmail: l.user?.email as string ?? '',
   }));
 
+  const logs = await enrichAuditLogs(rawLogs);
+  console.log('[audit/page] logs[0]:', JSON.stringify({ clientName: (logs as any)[0]?.clientName, saleTotal: (logs as any)[0]?.saleTotal }));
+
   return {
-    logs: await enrichAuditLogs(rawLogs),
+    logs,
     users: (usersRes.data ?? []).map((r: any) => ({ id: r.id as number, name: r.name as string })),
   };
 }

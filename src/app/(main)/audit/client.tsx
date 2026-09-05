@@ -15,9 +15,9 @@ interface AuditLog {
   // TAREA: Cliente + Valor total for EXIT_FULL/EXIT_PARTIAL rows (joined server-side via
   // enrichAuditLogs — see src/lib/auditEnrich.ts), plus whether the underlying Movement
   // has since been anulado (voided).
-  clientName: string | null;
-  saleTotal: number | null;
-  voided: boolean;
+  clientName?: string | null;
+  saleTotal?: number | null;
+  voided?: boolean;
 }
 interface User { id: number; name: string }
 

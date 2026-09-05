@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
     }));
 
     const enriched = await enrichAuditLogs(logs);
+    console.log('[audit/route] enriched[0]:', JSON.stringify({ clientName: enriched[0]?.clientName, saleTotal: enriched[0]?.saleTotal }));
 
     return Response.json({ logs: enriched, users: usersRes.data ?? [] });
   } catch (err) {
