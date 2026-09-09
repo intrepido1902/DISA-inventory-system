@@ -4,6 +4,7 @@ const EXIT_ACTIONS = new Set(['EXIT_FULL', 'EXIT_PARTIAL']);
 
 export interface AuditLogBase {
   action: string;
+  entity: string;
   entityId: number;
   // Postgres bigint columns can come back from PostgREST/supabase-js as JSON strings (to avoid
   // precision loss above Number.MAX_SAFE_INTEGER), so this isn't guaranteed to be a `number`
@@ -15,6 +16,11 @@ export interface AuditLogEnrichment {
   clientName: string | null;
   saleTotal: number | null;
   voided: boolean;
+  // Human-readable Roll identifiers for logs whose entity is 'Roll' — entityId alone is just
+  // the internal Roll.id and means nothing to a user. Null for non-Roll entities, or if the
+  // Roll row could not be found (e.g. it was later deleted).
+  rollConsecutivo: string | null;
+  rollDisaNumber: string | null;
 }
 
 interface MovementCandidate {
@@ -46,6 +52,31 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
 
   const candidatesByRoll = new Map<number, MovementCandidate[]>();
 
+  // Batch-fetch Roll(rollNumber, disaNumber) for every log whose entity is 'Roll', in one query,
+  // so the table can show the human-readable consecutivo/No. Rollo instead of the raw Roll.id.
+  const rollEntityIds = [...new Set(
+    logs.filter(l => l.entity === 'Roll').map(l => l.entityId)
+  )];
+
+  const rollById = new Map<number, { rollNumber: string | null; disaNumber: string | null }>();
+
+  if (rollEntityIds.length > 0) {
+    const dbAny = db as any;
+    const { data: rolls, error } = await dbAny
+      .from('Roll')
+      .select('id, rollNumber, disaNumber')
+      .in('id', rollEntityIds);
+
+    if (error) console.error('[auditEnrich] Roll lookup error:', error);
+
+    for (const r of rolls ?? []) {
+      rollById.set(r.id as number, {
+        rollNumber: r.rollNumber ?? null,
+        disaNumber: r.disaNumber ?? null,
+      });
+    }
+  }
+
   if (exitRollIds.length > 0) {
     const dbAny = db as any;
     const { data: movs, error } = await dbAny
@@ -75,8 +106,12 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
   const MATCH_THRESHOLD_MS = 5000;
 
   const result = logs.map(l => {
+    const rollInfo = l.entity === 'Roll' ? rollById.get(l.entityId) : undefined;
+    const rollConsecutivo = rollInfo?.rollNumber ?? null;
+    const rollDisaNumber = rollInfo?.disaNumber ?? null;
+
     if (!EXIT_ACTIONS.has(l.action)) {
-      return { ...l, clientName: null, saleTotal: null, voided: false };
+      return { ...l, clientName: null, saleTotal: null, voided: false, rollConsecutivo, rollDisaNumber };
     }
 
     const candidates = candidatesByRoll.get(l.entityId) ?? [];
@@ -98,6 +133,8 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
       clientName: matched?.clientName ?? null,
       saleTotal: matched?.saleTotal ?? null,
       voided: matched?.reverted ?? false,
+      rollConsecutivo,
+      rollDisaNumber,
     };
   });
 

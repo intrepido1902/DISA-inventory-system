@@ -16,6 +16,12 @@ export async function GET(request: NextRequest) {
   const userIdFilter = searchParams.get('userId') ?? '';
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo = searchParams.get('dateTo') ?? '';
+  const clientNameFilter = searchParams.get('clientName') ?? '';
+
+  // dateFrom/dateTo arrive as ISO date strings ("2026-08-01"); createdAt is a bigint epoch-ms
+  // column, so convert to day-boundary timestamps before filtering against it.
+  const fromMs = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null;
+  const toMs = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null;
 
   try {
     let query = db.from('AuditLog').select(`
@@ -25,8 +31,8 @@ export async function GET(request: NextRequest) {
 
     if (actionFilter) query = query.eq('action', actionFilter);
     if (userIdFilter) query = query.eq('userId', Number(userIdFilter));
-    if (dateFrom) query = query.gte('createdAt', new Date(dateFrom).setHours(0, 0, 0, 0));
-    if (dateTo) query = query.lte('createdAt', new Date(dateTo).setHours(23, 59, 59, 999));
+    if (fromMs !== null) query = query.gte('createdAt', fromMs);
+    if (toMs !== null) query = query.lte('createdAt', toMs);
 
     const [logsRes, usersRes] = await Promise.all([
       query.order('createdAt', { ascending: false }).limit(500),
@@ -50,7 +56,13 @@ export async function GET(request: NextRequest) {
     const enriched = await enrichAuditLogs(logs);
     console.log('[audit/route] enriched[0]:', JSON.stringify({ clientName: enriched[0]?.clientName, saleTotal: enriched[0]?.saleTotal }));
 
-    return Response.json({ logs: enriched, users: usersRes.data ?? [] });
+    // clientName comes from the Sale-based enrichment, not from AuditLog itself, so it can only
+    // be filtered in-memory after enrichAuditLogs runs — not as part of the AuditLog query above.
+    const filtered = clientNameFilter
+      ? enriched.filter(l => l.clientName?.toLowerCase().includes(clientNameFilter.toLowerCase()))
+      : enriched;
+
+    return Response.json({ logs: filtered, users: usersRes.data ?? [] });
   } catch (err) {
     console.error('GET /api/audit error:', err);
     return Response.json({ error: 'Error al obtener auditoría' }, { status: 500 });

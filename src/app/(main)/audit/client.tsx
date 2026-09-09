@@ -18,6 +18,10 @@ interface AuditLog {
   clientName?: string | null;
   saleTotal?: number | null;
   voided?: boolean;
+  // Human-readable Roll identifiers for entity === 'Roll' rows (joined server-side via
+  // enrichAuditLogs — see src/lib/auditEnrich.ts). entityId alone is just the internal Roll.id.
+  rollConsecutivo?: string | null;
+  rollDisaNumber?: string | null;
 }
 interface User { id: number; name: string }
 
@@ -221,6 +225,7 @@ export default function AuditClient({
   const canVoid = userRole === 'OWNER' || userRole === 'ADMIN';
   const [actionFilter, setActionFilter] = useState('');
   const [userFilter, setUserFilter] = useState('');
+  const [clientNameFilter, setClientNameFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -265,13 +270,14 @@ export default function AuditClient({
     return logs.filter(l => {
       const matchAction = !actionFilter || l.action === actionFilter;
       const matchUser = !userFilter || l.userName.toLowerCase().includes(userFilter.toLowerCase());
+      const matchClient = !clientNameFilter || (l.clientName ?? '').toLowerCase().includes(clientNameFilter.toLowerCase());
       const matchFrom = !dateFrom || l.createdAt >= new Date(dateFrom).setHours(0, 0, 0, 0);
       const matchTo = !dateTo || l.createdAt <= new Date(dateTo).setHours(23, 59, 59, 999);
-      return matchAction && matchUser && matchFrom && matchTo;
+      return matchAction && matchUser && matchClient && matchFrom && matchTo;
     });
-  }, [logs, actionFilter, userFilter, dateFrom, dateTo]);
+  }, [logs, actionFilter, userFilter, clientNameFilter, dateFrom, dateTo]);
 
-  const hasFilters = actionFilter || userFilter || dateFrom || dateTo;
+  const hasFilters = actionFilter || userFilter || clientNameFilter || dateFrom || dateTo;
 
   return (
     <div className="p-4 lg:p-6">
@@ -297,6 +303,9 @@ export default function AuditClient({
           <option value="">Todos los usuarios</option>
           {users.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
         </select>
+        <input type="text" value={clientNameFilter} onChange={e => setClientNameFilter(e.target.value)}
+          placeholder="Filtrar por cliente"
+          className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-500 uppercase tracking-wide">Desde</label>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
@@ -308,7 +317,7 @@ export default function AuditClient({
             className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
         </div>
         {hasFilters && (
-          <button onClick={() => { setActionFilter(''); setUserFilter(''); setDateFrom(''); setDateTo(''); }}
+          <button onClick={() => { setActionFilter(''); setUserFilter(''); setClientNameFilter(''); setDateFrom(''); setDateTo(''); }}
             className="text-sm text-gray-500 hover:text-gray-700 underline self-center">
             Limpiar
           </button>
@@ -367,7 +376,8 @@ export default function AuditClient({
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-xs font-mono">
-                        {log.entity} #{log.entityId}
+                        <div>Cons.: {log.rollConsecutivo ?? '—'}</div>
+                        <div>No. Rollo: {log.rollDisaNumber ?? '—'}</div>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-700">
                         {exit ? (log.clientName ?? '—') : <span className="text-gray-300">—</span>}
