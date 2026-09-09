@@ -93,7 +93,8 @@ function ReprintButtons({ log, isOwner }: { log: AuditLog; isOwner: boolean }) {
         const isBlackout = isBlackoutProduct(m.roll.product.category.name);
         const subtotal = m.meters * m.pricePerMeter;
         return {
-          consecutivo: m.roll.disaNumber ?? displayRollNumber(m.roll.rollNumber),
+          consecutivo: displayRollNumber(m.roll.rollNumber),
+          noRollo:     m.roll.disaNumber ?? '—',
           referencia:  buildFormatRef(m.roll.product.code, isBlackout),
           color:       buildColor(m.roll.product.color, m.roll.product.category.name),
           ancho:       m.roll.product.width,

@@ -629,7 +629,8 @@ export default function InventoryClient({
       rollos: saleResult.rolls.map(item => {
         const isBlackout = isBlackoutProduct(item.roll.category.name);
         return {
-          consecutivo: item.roll.disaNumber ?? displayRollNumber(item.roll.rollNumber),
+          consecutivo: displayRollNumber(item.roll.rollNumber),
+          noRollo: item.roll.disaNumber ?? '—',
           referencia: formatRef(item.roll.product.code, isBlackout),
           color: rollColor(item.roll),
           ancho: item.roll.product.width,

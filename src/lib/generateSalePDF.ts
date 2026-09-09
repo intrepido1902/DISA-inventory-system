@@ -4,6 +4,7 @@ export interface SalePDFData {
   cliente: { nombre: string };
   rollos: Array<{
     consecutivo: string;
+    noRollo: string;
     referencia: string;
     color: string;
     ancho: number;
@@ -102,6 +103,7 @@ export function generateSalePDF(data: SalePDFData): void {
       y += 1;
     }
     row('Consecutivo:', rollo.consecutivo);
+    row('No. Rollo:', rollo.noRollo);
     row('Referencia:', rollo.referencia);
     row('Color:', rollo.color);
     row('Ancho:', `${rollo.ancho} cm`);

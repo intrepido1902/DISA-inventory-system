@@ -320,7 +320,8 @@ export default async function RollTracePage({
                             <ReimprimirButton data={{
                               cliente: { nombre: m.clientName },
                               rollos: [{
-                                consecutivo: r.disaNumber ?? displayRollNumber(r.rollNumber),
+                                consecutivo: displayRollNumber(r.rollNumber),
+                                noRollo: r.disaNumber ?? '—',
                                 referencia: refDisplay,
                                 color: displayColor,
                                 ancho: r.product?.width ?? 0,
