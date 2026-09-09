@@ -19,9 +19,12 @@ export async function GET(request: NextRequest) {
   const clientNameFilter = searchParams.get('clientName') ?? '';
 
   // dateFrom/dateTo arrive as ISO date strings ("2026-08-01"); createdAt is a bigint epoch-ms
-  // column, so convert to day-boundary timestamps before filtering against it.
-  const fromMs = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null;
-  const toMs = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null;
+  // column. Force UTC boundaries explicitly — new Date(dateFrom).setHours(...) interprets the
+  // time in the server process's local timezone, which shifts the range depending on where/how
+  // the server runs.
+  const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00.000Z`).getTime() : null;
+  const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999Z`).getTime() : null;
+  console.log('[audit/route] date range:', { dateFrom, dateTo, fromMs, toMs });
 
   try {
     let query = db.from('AuditLog').select(`
@@ -31,8 +34,8 @@ export async function GET(request: NextRequest) {
 
     if (actionFilter) query = query.eq('action', actionFilter);
     if (userIdFilter) query = query.eq('userId', Number(userIdFilter));
-    if (fromMs !== null) query = query.gte('createdAt', fromMs);
-    if (toMs !== null) query = query.lte('createdAt', toMs);
+    if (fromMs) query = query.gte('createdAt', fromMs);
+    if (toMs) query = query.lte('createdAt', toMs);
 
     const [logsRes, usersRes] = await Promise.all([
       query.order('createdAt', { ascending: false }).limit(500),
