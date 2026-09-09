@@ -232,8 +232,8 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* Today movements */}
-      <div className="bg-white rounded-lg border border-[#E5E5E5]">
+      {/* Today movements — oculto temporalmente (hidden), no eliminado. Quitar `hidden` para reactivarlo. */}
+      <div hidden className="bg-white rounded-lg border border-[#E5E5E5]">
         <div className="px-4 lg:px-5 py-4 border-b border-[#E5E5E5] flex items-center justify-between">
           <div>
             <h2 className="font-semibold text-gray-900">Movimientos de hoy</h2>
