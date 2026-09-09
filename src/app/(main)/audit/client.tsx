@@ -306,17 +306,25 @@ export default function AuditClient({
         <input type="text" value={clientNameFilter} onChange={e => setClientNameFilter(e.target.value)}
           placeholder="Filtrar por cliente"
           className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500 uppercase tracking-wide">Desde</label>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500 uppercase tracking-wide">Hasta</label>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
-        </div>
-        {hasFilters && (
+        {/* Filtro por fecha (DESDE/HASTA) — oculto temporalmente, no eliminado. Quitar el
+            `false &&` para reactivarlo. */}
+        {false && (
+          <>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500 uppercase tracking-wide">Desde</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500 uppercase tracking-wide">Hasta</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="border border-[#E5E5E5] bg-white rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
+            </div>
+          </>
+        )}
+        {/* Botón Limpiar — oculto junto con el filtro de fecha (mismo motivo). Quitar el
+            `false &&` para reactivarlo. */}
+        {false && hasFilters && (
           <button onClick={() => { setActionFilter(''); setUserFilter(''); setClientNameFilter(''); setDateFrom(''); setDateTo(''); }}
             className="text-sm text-gray-500 hover:text-gray-700 underline self-center">
             Limpiar

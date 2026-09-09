@@ -35,8 +35,10 @@ export async function GET(request: NextRequest) {
 
     if (actionFilter) query = query.eq('action', actionFilter);
     if (userIdFilter) query = query.eq('userId', Number(userIdFilter));
-    if (fromMs) query = query.gte('createdAt', fromMs);
-    if (toMs) query = query.lte('createdAt', toMs);
+    // Only apply the date filter when a boundary was actually computed — if fromMs/toMs are
+    // null or undefined (no dateFrom/dateTo param), no filter is applied and all rows pass.
+    if (fromMs != null) query = query.gte('createdAt', fromMs);
+    if (toMs != null) query = query.lte('createdAt', toMs);
 
     const [logsRes, usersRes] = await Promise.all([
       query.order('createdAt', { ascending: false }).limit(500),
