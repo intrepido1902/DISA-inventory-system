@@ -19,11 +19,12 @@ export async function GET(request: NextRequest) {
   const clientNameFilter = searchParams.get('clientName') ?? '';
 
   // dateFrom/dateTo arrive as ISO date strings ("2026-08-01"); createdAt is a bigint epoch-ms
-  // column. Force UTC boundaries explicitly — new Date(dateFrom).setHours(...) interprets the
-  // time in the server process's local timezone, which shifts the range depending on where/how
-  // the server runs.
-  const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00.000Z`).getTime() : null;
-  const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999Z`).getTime() : null;
+  // column. Force the fixed Bogotá offset (UTC-5, no DST) explicitly — new Date(dateFrom)
+  // .setHours(...) interprets the time in the server process's local timezone (shifting the
+  // range depending on where/how the server runs), and plain "Z"/UTC would shift the boundary
+  // 5h away from the Colombian calendar day the user actually picked in the date input.
+  const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00.000-05:00`).getTime() : null;
+  const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999-05:00`).getTime() : null;
   console.log('[audit/route] date range:', { dateFrom, dateTo, fromMs, toMs });
 
   try {
