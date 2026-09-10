@@ -82,7 +82,7 @@ async function getInventoryData(isRemnantTab: boolean, search = '') {
 
   const [rollsRes, clientsRes, productsRes, lotsRes, remCountRes, activeCountRes, metersRes] = await Promise.all([
     rollQuery.range(0, 99),
-    db.from('Client').select('id, name, type, sellsByRoll').eq('active', 1).order('name', { ascending: true }),
+    db.from('Client').select('id, name, type, sellsByRoll, priceTier').eq('active', 1).order('name', { ascending: true }),
     db.from('Product').select('id, name, code, color, width, categoryId').eq('active', 1).order('name', { ascending: true }),
     db.from('ImportLot').select('id, lotNumber').order('importDate', { ascending: false }),
     db.from('Roll').select('id', { count: 'exact', head: true }).eq('status', 'REMNANT'),
@@ -108,6 +108,7 @@ async function getInventoryData(isRemnantTab: boolean, search = '') {
       name: r.name as string,
       type: r.type as string,
       sellsByRoll: Boolean(r.sellsByRoll),
+      priceTier: (r.priceTier ?? null) as string | null,
     })),
     products: (productsRes.data ?? []).map((r: any) => ({
       id: r.id as number,

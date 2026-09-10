@@ -60,10 +60,14 @@ export async function POST(request: NextRequest) {
         email: email?.trim() || null,
         notes: notes?.trim() || null,
         sellsByRoll: isFixed ? Boolean(sellsByRoll) : false,
+        // Default fallback price tier from type — only used when there's no negotiated
+        // ClientPrice row for a given referencia. 'OWNER' isn't assignable here; it's set
+        // manually for special clients (e.g. Implecor) — see scripts/2026-09-09-add-client-price-tier.sql.
+        priceTier: isFixed ? 'B2B' : 'B2C',
         active: 1,
         createdAt: now,
       })
-      .select('id, name, type, phone, email, notes, active, createdAt, sellsByRoll')
+      .select('id, name, type, phone, email, notes, active, createdAt, sellsByRoll, priceTier')
       .single();
 
     if (error) {

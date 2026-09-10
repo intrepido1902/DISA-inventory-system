@@ -77,19 +77,27 @@ export default function OrphanRemnantsClient({ items: initial, canEdit, isOwner 
     setFormError(null);
     setFormLoading(true);
 
+    // Accept comma as decimal separator ("12,5" → "12.5") before parsing.
+    const widthNormalized = form.width.trim().replace(',', '.');
+    const metersNormalized = form.estimatedMeters.trim().replace(',', '.');
+
+    if (widthNormalized && (isNaN(parseFloat(widthNormalized)) || parseFloat(widthNormalized) <= 0)) {
+      setFormError('Ancho debe ser un número válido mayor a 0'); setFormLoading(false); return;
+    }
+    if (isNaN(parseFloat(metersNormalized)) || parseFloat(metersNormalized) <= 0) {
+      setFormError('Metros deben ser un número válido mayor a 0'); setFormLoading(false); return;
+    }
+
     const payload = {
       reference:       form.reference.trim(),
       color:           form.color.trim(),
-      estimatedMeters: parseFloat(form.estimatedMeters),
-      width:           parseInt(form.width) || 0,
+      estimatedMeters: parseFloat(metersNormalized),
+      width:           widthNormalized ? parseFloat(widthNormalized) : 0,
       location:        form.location.trim(),
       notes:           form.notes.trim() || undefined,
     };
 
     if (!payload.reference) { setFormError('Referencia es requerida'); setFormLoading(false); return; }
-    if (!payload.estimatedMeters || payload.estimatedMeters <= 0) {
-      setFormError('Metros deben ser mayores a 0'); setFormLoading(false); return;
-    }
 
     try {
       if (editId !== null) {
@@ -237,14 +245,14 @@ export default function OrphanRemnantsClient({ items: initial, canEdit, isOwner 
                     className="input-base" />
                 </Field>
                 <Field label="Ancho (cm)">
-                  <input type="number" value={form.width} min="0"
+                  <input type="text" inputMode="decimal" value={form.width}
                     placeholder="ej. 300"
                     onChange={e => setForm(f => ({ ...f, width: e.target.value }))}
                     className="input-base" />
                 </Field>
               </div>
               <Field label="Metros estimados *">
-                <input type="number" value={form.estimatedMeters} min="0.1" step="0.1" required
+                <input type="text" inputMode="decimal" value={form.estimatedMeters} required
                   placeholder="ej. 12.5"
                   onChange={e => setForm(f => ({ ...f, estimatedMeters: e.target.value }))}
                   className="input-base" />

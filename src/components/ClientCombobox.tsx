@@ -8,6 +8,9 @@ export interface ComboClient {
   type: string;
   pricePerMeter?: number | null;
   sellsByRoll?: boolean;
+  // Fallback price tier ('OWNER' | 'B2B' | 'B2C') used to pick Product.priceOwner/priceB2B/
+  // priceB2C only when there's no negotiated ClientPrice row for this client + referencia.
+  priceTier?: string | null;
 }
 
 interface ClientComboboxProps {
@@ -136,6 +139,7 @@ export default function ClientCombobox({
         type: data.type,
         pricePerMeter: data.pricePerMeter ?? null,
         sellsByRoll: Boolean(data.sellsByRoll),
+        priceTier: data.priceTier ?? null,
       };
       onClientCreated(newClient);
       onChange(String(newClient.id));

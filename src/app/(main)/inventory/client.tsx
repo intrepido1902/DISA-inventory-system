@@ -396,36 +396,53 @@ export default function InventoryClient({
     }
     if (!priceClientId) return;
 
+    // Fallback tier — only used when there's no negotiated ClientPrice row for this client +
+    // referencia. Client.priceTier ('OWNER' | 'B2B' | 'B2C') maps directly to
+    // Product.priceOwner / priceB2B / priceB2C; clients created before that column existed
+    // fall back to a sensible default from `type`.
+    const tier = client.priceTier ?? (isFixed ? 'B2B' : 'B2C');
+    const TIER_LABEL: Record<string, string> = { OWNER: 'propietario', B2B: 'B2B', B2C: 'general' };
+    function fallbackPrice(roll: Roll): number | null {
+      const p = roll.product;
+      const val = tier === 'OWNER' ? p.priceOwner : tier === 'B2B' ? p.priceB2B : p.priceB2C;
+      return val > 0 ? val : null;
+    }
+
     setFetchingPrices(true);
     Promise.all(
       selectedRolls.map(roll =>
         fetch(`/api/clients/price?clientId=${priceClientId}&ref=${baseRef(roll.product.code)}`)
           .then(r => r.json())
-          .then(data => ({ rollId: roll.id, pricePerMeter: data.pricePerMeter ?? null }))
-          .catch(() => ({ rollId: roll.id, pricePerMeter: null }))
+          .then(data => ({ rollId: roll.id, pricePerMeter: data.pricePerMeter ?? null, fallback: fallbackPrice(roll) }))
+          .catch(() => ({ rollId: roll.id, pricePerMeter: null, fallback: fallbackPrice(roll) }))
       )
     ).then(results => {
       setRollPrices(() => {
         const next: Record<number, string> = {};
-        results.forEach(({ rollId, pricePerMeter }) => {
-          if (pricePerMeter !== null) next[rollId] = String(pricePerMeter);
+        results.forEach(({ rollId, pricePerMeter, fallback }) => {
+          const effective = pricePerMeter ?? fallback;
+          if (effective !== null) next[rollId] = String(effective);
         });
         return next;
       });
       setRollPriceLocked(() => {
         const next: Record<number, boolean> = {};
         results.forEach(({ rollId, pricePerMeter }) => {
+          // Only a negotiated ClientPrice entry locks the field — a Product-tier fallback
+          // is just a suggestion and stays editable.
           next[rollId] = isFixed && pricePerMeter !== null;
         });
         return next;
       });
       setRollPriceHints(() => {
         const next: Record<number, string> = {};
-        results.forEach(({ rollId, pricePerMeter }) => {
-          if (pricePerMeter !== null && !isFixed) {
-            next[rollId] = 'Precio de lista sugerido. Puedes ajustarlo.';
-          } else if (pricePerMeter === null && isFixed) {
-            next[rollId] = 'Sin precio para esta referencia — ingresa manualmente';
+        results.forEach(({ rollId, pricePerMeter, fallback }) => {
+          if (pricePerMeter !== null) {
+            if (!isFixed) next[rollId] = 'Precio de lista sugerido. Puedes ajustarlo.';
+          } else if (fallback !== null) {
+            next[rollId] = `Precio ${TIER_LABEL[tier] ?? tier} de catálogo. Puedes ajustarlo.`;
+          } else {
+            next[rollId] = `Este producto no tiene precio configurado para ${client.name}`;
           }
         });
         return next;
@@ -433,7 +450,8 @@ export default function InventoryClient({
     }).finally(() => setFetchingPrices(false));
   }, [exitClient, selectedRolls, clientsList]);
 
-  // Force EXIT_FULL for all rolls when client sellsByRoll
+  // Preselect EXIT_FULL for all rolls when client sellsByRoll — a default, not a lock; the
+  // toggle in each roll card still lets the user switch to a partial cut for any client.
   useEffect(() => {
     if (!selectedClient?.sellsByRoll) return;
     setRollExitTypes(prev => {
@@ -1255,7 +1273,6 @@ export default function InventoryClient({
                         ? roll.currentMeters
                         : parseFloat(rollMeters[roll.id] || '0');
                       const rowSubtotal = metersForCalc * parseFloat(price || '0');
-                      const forceFull = selectedClient?.sellsByRoll;
 
                       return (
                         <div key={roll.id} className="border border-[#E5E5E5] rounded-lg p-3 space-y-2.5">
@@ -1289,13 +1306,9 @@ export default function InventoryClient({
                             </div>
                           )}
 
-                          {/* Metros + precio */}
-                          {forceFull ? (
-                            <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1.5">
-                              Venta por rollo completo · {roll.currentMeters} m
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-2 gap-2">
+                          {/* Metros + precio — todos los clientes pueden elegir completo o parcial;
+                              sellsByRoll solo preselecciona "Completo" como valor por defecto. */}
+                          <div className="grid grid-cols-2 gap-2">
                               {/* Metros */}
                               <div>
                                 <div className="flex gap-1 mb-1">
@@ -1335,11 +1348,10 @@ export default function InventoryClient({
                                   )}
                                 </div>
                                 {hint && !fetchingPrices && (
-                                  <p className={`text-[10px] mt-0.5 ${hint.startsWith('Sin') ? 'text-amber-600' : 'text-blue-500'}`}>{hint}</p>
+                                  <p className={`text-[10px] mt-0.5 ${hint.startsWith('Sin') || hint.startsWith('Este producto') ? 'text-amber-600' : 'text-blue-500'}`}>{hint}</p>
                                 )}
                               </div>
                             </div>
-                          )}
 
                           {/* Row subtotal */}
                           {rowSubtotal > 0 && (
