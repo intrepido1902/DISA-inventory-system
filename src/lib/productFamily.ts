@@ -57,3 +57,33 @@ export function buildCodeFilter(term: string): string {
   if (lower === 'as' || t === '22') return getFamilyOrFilter('AS');
   return `code.ilike.%${t}%`;
 }
+
+/**
+ * Some references (e.g. ClientPrice.productRef, or Roll's derived ref) are stored with the
+ * family prefix and some without — "AS2203" and "2203" are the same product, as are
+ * "LSFH2306" and "2306". Given one form, returns every equivalent form so a lookup can match
+ * either — this resolves the discrepancy at query time instead of having to normalize the
+ * data in the DB.
+ *
+ *   "AS2203"   → ["AS2203", "2203"]
+ *   "2203"     → ["2203", "AS2203"]
+ *   "LSFH2306" → ["LSFH2306", "2306"]
+ *   "2306"     → ["2306", "LSFH2306"]
+ *   anything else (no recognized prefix, doesn't start with 22/23) → [ref] unchanged
+ *
+ * Also handles suffixed refs the same way (e.g. "LSFH2306-1" ⇄ "2306-1", "AS2203-1" ⇄ "2203-1").
+ */
+export function normalizeRef(ref: string): string[] {
+  const r = ref.trim();
+  if (!r) return [r];
+
+  const asMatch = /^AS(.*)$/i.exec(r);
+  if (asMatch) return [r, asMatch[1]];
+  if (/^22/.test(r)) return [r, `AS${r}`];
+
+  const lsfhMatch = /^LSFH(.*)$/i.exec(r);
+  if (lsfhMatch) return [r, lsfhMatch[1]];
+  if (/^23/.test(r)) return [r, `LSFH${r}`];
+
+  return [r];
+}

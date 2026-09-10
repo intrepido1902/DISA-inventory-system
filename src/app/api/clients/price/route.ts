@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/session';
 import { db } from '@/lib/db';
+import { normalizeRef } from '@/lib/productFamily';
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -15,11 +16,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // productRef may be stored with or without the AS/LSFH family prefix ("AS2203" vs "2203",
+    // "LSFH2306" vs "2306") — match either form instead of requiring the data to be normalized.
     const { data } = await (db as any)
       .from('ClientPrice')
       .select('pricePerMeter')
       .eq('clientId', Number(clientId))
-      .eq('productRef', ref)
+      .in('productRef', normalizeRef(ref))
+      .limit(1)
       .maybeSingle();
 
     return Response.json({ pricePerMeter: data?.pricePerMeter ?? null });
