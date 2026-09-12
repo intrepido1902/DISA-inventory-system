@@ -33,7 +33,6 @@ async function getDashboardData(role: string) {
     allProductsRes,
     todayMovRes,
     monthMovRes,
-    salesMesRes,
     salesTotalesRes,
   ] = await Promise.all([
     db.from('Roll').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
@@ -41,24 +40,29 @@ async function getDashboardData(role: string) {
     // Fetch only productId for per-product stats; limit 5000 to cover all rolls
     (db as any).from('Roll').select('productId').eq('status', 'ACTIVE').limit(5000),
     db.from('Product').select('id, name, code, categoryId, category:categoryId(id, name)').eq('active', 1),
+    // Exclude voided (reverted) exits — a fully or partially anulado movement shouldn't
+    // count toward today's total.
     db.from('Movement').select(`
       id, type, meters, createdAt,
       roll:rollId(rollNumber, product:productId(name, code, color)),
       user:userId(name),
       sale:saleId(client:clientId(name), total)
-    `).gte('createdAt', dayStart).order('createdAt', { ascending: false }).limit(20),
+    `).gte('createdAt', dayStart).neq('reverted', true).order('createdAt', { ascending: false }).limit(20),
+    // Last 30 days of non-reverted exits — feeds totalMetersThisMonth/topProductLastMonth
+    // (re-filtered to the calendar month within the loop below) and, extended with
+    // Movement.total, ventasMes as well — one query serving all three.
     isManager
       ? db.from('Movement').select(`
-          id, type, meters, createdAt,
-          roll:rollId(productId),
-          sale:saleId(clientId, total)
-        `).in('type', ['EXIT_FULL', 'EXIT_PARTIAL']).gte('createdAt', thirtyDaysAgo)
+          id, type, meters, createdAt, total,
+          roll:rollId(productId)
+        `).in('type', ['EXIT_FULL', 'EXIT_PARTIAL']).neq('reverted', true).gte('createdAt', thirtyDaysAgo)
       : Promise.resolve({ data: [] }),
+    // All-time non-reverted exits, summed from Movement.total (the line total after
+    // discount) rather than Sale.total, so a partially-voided sale only loses the voided
+    // roll's share instead of disappearing (or over-counting) entirely.
     isOwner
-      ? (db as any).from('Sale').select('total').gte('createdAt', monthStart)
-      : Promise.resolve({ data: [] }),
-    isOwner
-      ? (db as any).from('Sale').select('total')
+      ? (db as any).from('Movement').select('total')
+          .in('type', ['EXIT_FULL', 'EXIT_PARTIAL']).neq('reverted', true)
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -99,12 +103,16 @@ async function getDashboardData(role: string) {
   // Last 30 days sales analysis
   let topProductLastMonth: { name: string; code: string; meters: number } | null = null;
   let totalMetersThisMonth = 0;
+  let ventasMesSum = 0;
   const productMetersLastMonth = new Map<number, number>();
 
   for (const m of monthMov) {
     const meters = (m.meters as number) ?? 0;
     const ts = m.createdAt as number;
-    if (ts >= monthStart) totalMetersThisMonth += meters;
+    if (ts >= monthStart) {
+      totalMetersThisMonth += meters;
+      ventasMesSum += (m.total as number) ?? 0;
+    }
     const productId = m.roll?.productId;
     if (productId) productMetersLastMonth.set(productId, (productMetersLastMonth.get(productId) ?? 0) + meters);
   }
@@ -143,9 +151,7 @@ async function getDashboardData(role: string) {
         .reduce((sum, m) => sum + (m.saleTotal ?? 0), 0)
     : null;
 
-  const ventasMes = isOwner
-    ? ((salesMesRes as any).data ?? []).reduce((s: number, r: any) => s + (r.total ?? 0), 0)
-    : null;
+  const ventasMes = isOwner ? ventasMesSum : null;
   const ventasTotales = isOwner
     ? ((salesTotalesRes as any).data ?? []).reduce((s: number, r: any) => s + (r.total ?? 0), 0)
     : null;
