@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     // 2. Fetch the roll (need initialMeters to recalculate status)
     const rollRes: any = await dbAny
       .from('Roll')
-      .select('id, currentMeters, initialMeters, status')
+      .select('id, currentMeters, initialMeters, status, rollNumber, disaNumber')
       .eq('id', mov.rollId)
       .single();
 
@@ -89,6 +89,16 @@ export async function POST(request: NextRequest) {
     const currentMeters = roll.currentMeters as number;
     const initialMeters = roll.initialMeters as number;
     const metersToRestore = mov.meters as number;
+
+    let voidClientName: string | null = null;
+    if (mov.saleId) {
+      const saleRes2: any = await dbAny
+        .from('Sale')
+        .select('clientName')
+        .eq('id', mov.saleId)
+        .maybeSingle();
+      voidClientName = saleRes2.data?.clientName ?? null;
+    }
 
     // 3. Restore meters (cap at initialMeters) and recompute status
     const newMeters = Math.min(initialMeters, currentMeters + metersToRestore);
@@ -130,6 +140,9 @@ export async function POST(request: NextRequest) {
         reason: trimmedReason,
         voidedMovementId: mov.id,
         voidedRollId: mov.rollId,
+        rollConsecutivo: roll.rollNumber ?? null,
+        rollDisaNumber: roll.disaNumber ?? null,
+        clientName: voidClientName,
       }),
       createdAt: now,
     });

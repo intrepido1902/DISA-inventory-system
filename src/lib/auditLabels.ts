@@ -69,6 +69,9 @@ const FIELD_LABELS: Record<string, string> = {
   reverted: 'Anulado',
   voidedMovementId: 'Movimiento anulado',
   voidedRollId: 'Rollo',
+  rollConsecutivo: 'Consecutivo',
+  rollDisaNumber: 'No. Rollo',
+  clientName: 'Cliente',
 };
 
 const VALUE_LABELS: Record<string, string> = {
