@@ -361,9 +361,9 @@ export default function AuditClient({
                 filtered.map(log => {
                   const exit = isExitAction(log.action);
                   const isVoidRow = log.action === 'VOID_MOVEMENT';
-                  let voidReasonText: string | null = null;
+                  let voidMeta: { rollConsecutivo?: string; rollDisaNumber?: string; clientName?: string; reason?: string } = {};
                   if (isVoidRow && log.newData) {
-                    try { voidReasonText = (JSON.parse(log.newData) as { reason?: string }).reason ?? null; } catch { /* ignore */ }
+                    try { voidMeta = JSON.parse(log.newData); } catch { /* ignore */ }
                   }
                   return (
                     <tr key={log.id} className={`border-b border-[#F5F5F5] hover:bg-gray-50 ${exit && log.voided ? 'opacity-60' : ''}`}>
@@ -385,12 +385,16 @@ export default function AuditClient({
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-xs font-mono">
-                        <div>Cons.: {log.rollConsecutivo ?? '—'}</div>
-                        <div>No. Rollo: {log.rollDisaNumber ?? '—'}</div>
+                        <div>Cons.: {(isVoidRow ? voidMeta.rollConsecutivo : undefined) ?? log.rollConsecutivo ?? '—'}</div>
+                        <div>No. Rollo: {(isVoidRow ? voidMeta.rollDisaNumber : undefined) ?? log.rollDisaNumber ?? '—'}</div>
                         {log.rollReference && <div className="text-gray-400">Ref.: {log.rollReference}</div>}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-700">
-                        {exit ? (log.clientName ?? '—') : <span className="text-gray-300">—</span>}
+                        {exit
+                          ? (log.clientName ?? '—')
+                          : isVoidRow
+                            ? (voidMeta.clientName ?? '—')
+                            : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-700 text-right tabular-nums">
                         {exit && log.saleTotal != null ? formatCOP(log.saleTotal) : <span className="text-gray-300">—</span>}
@@ -402,8 +406,8 @@ export default function AuditClient({
                         {isVoidRow ? (
                           <div>
                             <div className="text-red-600 font-semibold">ANULADO</div>
-                            {voidReasonText && (
-                              <div className="text-gray-500 mt-0.5">Motivo: {voidReasonText}</div>
+                            {voidMeta.reason && (
+                              <div className="text-gray-500 mt-0.5">Motivo: {voidMeta.reason}</div>
                             )}
                           </div>
                         ) : formatAuditData(log.newData, users)}
