@@ -393,7 +393,7 @@ export default function AuditClient({
                         {exit
                           ? (log.clientName ?? '—')
                           : isVoidRow
-                            ? (voidMeta.clientName ?? '—')
+                            ? (voidMeta.clientName ?? log.clientName ?? '—')
                             : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-700 text-right tabular-nums">
