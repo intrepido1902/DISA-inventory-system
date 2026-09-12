@@ -48,7 +48,8 @@ export async function GET(request: NextRequest) {
       .from('Movement')
       .select('saleId, rollId, meters')
       .in('type', ['EXIT_FULL', 'EXIT_PARTIAL'])
-      .in('saleId', saleIds);
+      .in('saleId', saleIds)
+      .eq('reverted', false);
 
     // Aggregate per saleId
     const movMap = new Map<number, { rollCount: number; totalMeters: number }>();
@@ -62,7 +63,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const data = (sales as any[]).map(s => ({
+    const data = (sales as any[])
+      .filter(s => movMap.has(s.id as number))
+      .map(s => ({
       id:          s.id          as number,
       clientId:    s.clientId    as number,
       clientName:  s.clientName  as string,
