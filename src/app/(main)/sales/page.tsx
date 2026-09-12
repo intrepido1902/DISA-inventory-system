@@ -22,17 +22,19 @@ async function getSalesData(clientId = '', dateFrom = '', dateTo = '') {
     dbAny.from('Client').select('id, name').eq('active', 1).order('name', { ascending: true }),
   ]);
 
-  const sales = (saleRes.data ?? []) as any[];
+  const allSales = (saleRes.data ?? []) as any[];
   const total = saleRes.count ?? 0;
 
-  // Fetch movements for the first page
+  // Fetch movements for the first page — same logic as GET /api/sales: exclude reverted
+  // (anulado) movements so fully-voided sales don't show up on initial load.
   const rollCounts = new Map<number, { rollCount: number; totalMeters: number }>();
-  if (sales.length > 0) {
-    const saleIds = sales.map((s: any) => s.id as number);
+  if (allSales.length > 0) {
+    const saleIds = allSales.map((s: any) => s.id as number);
     const { data: movements } = await dbAny
       .from('Movement')
       .select('saleId, rollId, meters')
       .in('type', ['EXIT_FULL', 'EXIT_PARTIAL'])
+      .neq('reverted', true)
       .in('saleId', saleIds);
 
     for (const m of movements ?? []) {
@@ -41,6 +43,10 @@ async function getSalesData(clientId = '', dateFrom = '', dateTo = '') {
       else rollCounts.set(m.saleId as number, { rollCount: 1, totalMeters: Number(m.meters ?? 0) });
     }
   }
+
+  // Only sales with at least one active (non-reverted) exit movement — a fully-voided
+  // sale has no entry in rollCounts.
+  const sales = allSales.filter((s: any) => rollCounts.has(s.id as number));
 
   return {
     sales: sales.map((s: any) => ({
