@@ -22,6 +22,7 @@ interface AuditLog {
   // enrichAuditLogs — see src/lib/auditEnrich.ts). entityId alone is just the internal Roll.id.
   rollConsecutivo?: string | null;
   rollDisaNumber?: string | null;
+  rollReference?: string | null;
 }
 interface User { id: number; name: string }
 
@@ -386,6 +387,7 @@ export default function AuditClient({
                       <td className="px-4 py-3 text-gray-600 text-xs font-mono">
                         <div>Cons.: {log.rollConsecutivo ?? '—'}</div>
                         <div>No. Rollo: {log.rollDisaNumber ?? '—'}</div>
+                        {log.rollReference && <div className="text-gray-400">Ref.: {log.rollReference}</div>}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-700">
                         {exit ? (log.clientName ?? '—') : <span className="text-gray-300">—</span>}
