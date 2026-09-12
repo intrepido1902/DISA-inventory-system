@@ -102,19 +102,98 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
     }
   }
 
+  // Legacy VOID_MOVEMENT rows — created before the void route was fixed to log
+  // entity: 'Roll' + entityId: rollId — still have entity === 'Movement' and
+  // entityId === movementId. Resolve their roll/client info the long way: movementId →
+  // (rollId, saleId) → Roll / Sale. Purely additive: doesn't affect entity === 'Roll' rows.
+  const movementInfoById = new Map<number, { rollId: number | null; saleId: number | null }>();
+  const legacyVoidClientByMovement = new Map<number, string | null>();
+
+  const legacyVoidMovementIds = [...new Set(
+    logs.filter(l => l.action === 'VOID_MOVEMENT' && l.entity === 'Movement').map(l => l.entityId)
+  )];
+
+  if (legacyVoidMovementIds.length > 0) {
+    const dbAny = db as any;
+    const { data: movRows, error: movErr } = await dbAny
+      .from('Movement')
+      .select('id, rollId, saleId')
+      .in('id', legacyVoidMovementIds);
+
+    if (movErr) console.error('[auditEnrich] Legacy VOID_MOVEMENT Movement lookup error:', movErr);
+
+    for (const m of movRows ?? []) {
+      movementInfoById.set(m.id as number, {
+        rollId: m.rollId ?? null,
+        saleId: m.saleId ?? null,
+      });
+    }
+
+    // Merge into the same rollById map used for entity === 'Roll' rows, keyed by Roll.id.
+    const legacyRollIds = [...new Set(
+      [...movementInfoById.values()].map(v => v.rollId).filter((id): id is number => id !== null)
+    )];
+    if (legacyRollIds.length > 0) {
+      const { data: rolls, error: rollErr } = await dbAny
+        .from('Roll')
+        .select('id, rollNumber, disaNumber, product:productId(code)')
+        .in('id', legacyRollIds);
+
+      if (rollErr) console.error('[auditEnrich] Legacy VOID_MOVEMENT Roll lookup error:', rollErr);
+
+      for (const r of rolls ?? []) {
+        rollById.set(r.id as number, {
+          rollNumber: r.rollNumber ?? null,
+          disaNumber: r.disaNumber ?? null,
+          reference: (r.product as any)?.code ?? null,
+        });
+      }
+    }
+
+    const legacySaleIds = [...new Set(
+      [...movementInfoById.values()].map(v => v.saleId).filter((id): id is number => id !== null)
+    )];
+    if (legacySaleIds.length > 0) {
+      const { data: sales, error: saleErr } = await dbAny
+        .from('Sale')
+        .select('id, clientName')
+        .in('id', legacySaleIds);
+
+      if (saleErr) console.error('[auditEnrich] Legacy VOID_MOVEMENT Sale lookup error:', saleErr);
+
+      const saleClientById = new Map<number, string | null>();
+      for (const s of sales ?? []) saleClientById.set(s.id as number, s.clientName ?? null);
+
+      for (const [movId, info] of movementInfoById) {
+        if (info.saleId !== null) legacyVoidClientByMovement.set(movId, saleClientById.get(info.saleId) ?? null);
+      }
+    }
+  }
+
   // Matches are only trusted within this window of the AuditLog row's createdAt. In practice
   // both are written from the same Date.now() value in the same request, so the real diff is
   // 0 — this just guards against ever attaching an unrelated sale to a log row.
   const MATCH_THRESHOLD_MS = 5000;
 
   const result = logs.map(l => {
-    const rollInfo = l.entity === 'Roll' ? rollById.get(l.entityId) : undefined;
+    // Legacy VOID_MOVEMENT: entity is 'Movement' and entityId is the movementId — resolve
+    // roll/client info indirectly via movementInfoById instead of treating entityId as a
+    // Roll.id.
+    const isLegacyVoidMovement = l.action === 'VOID_MOVEMENT' && l.entity === 'Movement';
+    const legacyMovementInfo = isLegacyVoidMovement ? movementInfoById.get(l.entityId) : undefined;
+
+    const rollInfo = l.entity === 'Roll'
+      ? rollById.get(l.entityId)
+      : legacyMovementInfo?.rollId != null
+        ? rollById.get(legacyMovementInfo.rollId)
+        : undefined;
     const rollConsecutivo = rollInfo?.rollNumber ?? null;
     const rollDisaNumber = rollInfo?.disaNumber ?? null;
     const rollReference = rollInfo?.reference ?? null;
 
     if (!EXIT_ACTIONS.has(l.action)) {
-      return { ...l, clientName: null, saleTotal: null, voided: false, rollConsecutivo, rollDisaNumber, rollReference };
+      const legacyClientName = isLegacyVoidMovement ? legacyVoidClientByMovement.get(l.entityId) ?? null : null;
+      return { ...l, clientName: legacyClientName, saleTotal: null, voided: false, rollConsecutivo, rollDisaNumber, rollReference };
     }
 
     const candidates = candidatesByRoll.get(l.entityId) ?? [];
