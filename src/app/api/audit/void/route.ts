@@ -130,8 +130,8 @@ export async function POST(request: NextRequest) {
     await dbAny.from('AuditLog').insert({
       userId: session.userId,
       action: 'VOID_MOVEMENT',
-      entity: 'Movement',
-      entityId: mov.id,
+      entity: 'Roll',
+      entityId: mov.rollId,
       oldData: JSON.stringify({ currentMeters, status: roll.status, reverted: false }),
       newData: JSON.stringify({
         currentMeters: newMeters,
