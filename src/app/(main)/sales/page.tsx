@@ -9,21 +9,47 @@ const LIMIT = 50;
 async function getSalesData(clientId = '', dateFrom = '', dateTo = '') {
   const dbAny = db as any;
 
-  let saleQuery = dbAny
-    .from('Sale')
-    .select('id, clientId, clientName, date, subtotal, discount, total, createdAt', { count: 'exact' });
-
-  if (clientId)  saleQuery = saleQuery.eq('clientId', Number(clientId));
-  if (dateFrom)  saleQuery = saleQuery.gte('createdAt', new Date(dateFrom).setHours(0, 0, 0, 0));
-  if (dateTo)    saleQuery = saleQuery.lte('createdAt', new Date(dateTo).setHours(23, 59, 59, 999));
+  // Shared filters applied both to the paginated Sale fetch and to the "all matching ids"
+  // query used below to compute the true (non-voided) count.
+  function applySaleFilters(q: any) {
+    if (clientId) q = q.eq('clientId', Number(clientId));
+    if (dateFrom) q = q.gte('createdAt', new Date(dateFrom).setHours(0, 0, 0, 0));
+    if (dateTo)   q = q.lte('createdAt', new Date(dateTo).setHours(23, 59, 59, 999));
+    return q;
+  }
 
   const [saleRes, clientsRes] = await Promise.all([
-    saleQuery.order('createdAt', { ascending: false }).range(0, LIMIT - 1),
+    applySaleFilters(
+      dbAny.from('Sale').select('id, clientId, clientName, date, subtotal, discount, total, createdAt')
+    ).order('createdAt', { ascending: false }).range(0, LIMIT - 1),
     dbAny.from('Client').select('id, name').eq('active', 1).order('name', { ascending: true }),
   ]);
 
   const allSales = (saleRes.data ?? []) as any[];
-  const total = saleRes.count ?? 0;
+
+  // True total: Sale.count('exact') includes fully-voided sales (every movement reverted).
+  // Count distinct saleIds — across ALL pages matching the filters, not just this one —
+  // that still have at least one non-reverted exit movement. Same approach as
+  // GET /api/sales (commit f4d946f).
+  const { data: allSaleIdRows } = await applySaleFilters(
+    dbAny.from('Sale').select('id').limit(10000)
+  );
+  const allSaleIds = (allSaleIdRows ?? []).map((r: any) => r.id as number);
+
+  const activeSaleIds = new Set<number>();
+  const CHUNK = 500;
+  for (let i = 0; i < allSaleIds.length; i += CHUNK) {
+    const chunk = allSaleIds.slice(i, i + CHUNK);
+    const { data: activeRows } = await dbAny
+      .from('Movement')
+      .select('saleId')
+      .in('type', ['EXIT_FULL', 'EXIT_PARTIAL'])
+      .neq('reverted', true)
+      .in('saleId', chunk);
+    for (const r of activeRows ?? []) activeSaleIds.add(r.saleId as number);
+  }
+
+  const total = activeSaleIds.size;
 
   // Fetch movements for the first page — same logic as GET /api/sales: exclude reverted
   // (anulado) movements so fully-voided sales don't show up on initial load.
