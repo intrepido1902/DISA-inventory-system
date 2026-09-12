@@ -205,6 +205,9 @@ export default function InventoryClient({
   const [wizardRolls, setWizardRolls] = useState<Roll[]>([]);
   const [wizardLoading, setWizardLoading] = useState(false);
   const [wizardSearch, setWizardSearch] = useState('');
+  const [wizardSearchResults, setWizardSearchResults] = useState<Roll[]>([]);
+  const [wizardSearchLoading, setWizardSearchLoading] = useState(false);
+  const wizardSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedRolls, setSelectedRolls] = useState<Roll[]>([]);
 
   // Per-roll state keyed by roll ID
@@ -272,15 +275,13 @@ export default function InventoryClient({
     [products],
   );
 
-  const filteredWizardRolls = useMemo(() => {
-    if (!wizardSearch.trim()) return wizardRolls;
-    const q = wizardSearch.toLowerCase().trim();
-    return wizardRolls.filter(r =>
-      (r.disaNumber ?? '').toLowerCase().includes(q) ||
-      r.product.code.toLowerCase().includes(q) ||
-      r.rollNumber.toLowerCase().includes(q)
-    );
-  }, [wizardRolls, wizardSearch]);
+  // Rollos a mostrar en el picker: búsqueda contra el API mientras el usuario escribe,
+  // lista precargada cuando el buscador está vacío — en ambos casos, sin los que ya
+  // están en el carrito.
+  const pickerRolls = useMemo(() => {
+    const source = wizardSearch.trim() ? wizardSearchResults : wizardRolls;
+    return source.filter(r => !selectedRolls.some(s => s.id === r.id));
+  }, [wizardSearch, wizardSearchResults, wizardRolls, selectedRolls]);
 
   // Multi-roll real-time calculation
   const exitCalc = useMemo(() => {
@@ -517,12 +518,50 @@ export default function InventoryClient({
     }
   }
 
+  // Búsqueda en el servidor mientras el usuario escribe en el picker del carrito — la lista
+  // precargada (wizardRolls) puede no traer el rollo buscado, así que se busca por referencia
+  // (search) y por consecutivo/No. Rollo (rollNumber) en paralelo, para ACTIVE y REMNANT.
+  async function searchWizardRolls(term: string) {
+    if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
+    if (!term.trim()) {
+      setWizardSearchResults([]);
+      return;
+    }
+    wizardSearchRef.current = setTimeout(async () => {
+      setWizardSearchLoading(true);
+      try {
+        const [r1, r2, r3, r4] = await Promise.all([
+          fetch('/api/inventory?' + new URLSearchParams({ search: term, status: 'ACTIVE', limit: '20' })).then(r => r.json()),
+          fetch('/api/inventory?' + new URLSearchParams({ search: term, status: 'REMNANT', limit: '20' })).then(r => r.json()),
+          fetch('/api/inventory?' + new URLSearchParams({ rollNumber: term, status: 'ACTIVE', limit: '10' })).then(r => r.json()),
+          fetch('/api/inventory?' + new URLSearchParams({ rollNumber: term, status: 'REMNANT', limit: '10' })).then(r => r.json()),
+        ]);
+        const all: Roll[] = [
+          ...(r1.data ?? []), ...(r2.data ?? []),
+          ...(r3.data ?? []), ...(r4.data ?? []),
+        ];
+        const seen = new Set<number>();
+        const deduped = all.filter(r => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+        setWizardSearchResults(deduped);
+      } catch {
+        setWizardSearchResults([]);
+      } finally {
+        setWizardSearchLoading(false);
+      }
+    }, 350);
+  }
+
   function openExitFlow(preselectedRoll?: Roll) {
     setShowExit(true);
     setExitStep('cart');
     setSelectedRolls(preselectedRoll ? [preselectedRoll] : []);
     setShowRollPicker(!preselectedRoll); // open the picker immediately when no roll preselected
-    setWizardSearch('');
+    setWizardSearch(''); setWizardSearchResults([]);
+    if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
     setExitClient(''); setExitClientName('');
     setExitDiscount(''); setExitNotes('');
     setRollExitTypes({}); setRollMeters({});
@@ -536,7 +575,8 @@ export default function InventoryClient({
     setShowExit(false);
     setExitStep('cart');
     setShowRollPicker(true);
-    setWizardRolls([]); setWizardSearch('');
+    setWizardRolls([]); setWizardSearch(''); setWizardSearchResults([]);
+    if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
     setSelectedRolls([]);
     setExitClient(''); setExitClientName('');
     setExitDiscount(''); setExitNotes('');
@@ -1292,26 +1332,29 @@ export default function InventoryClient({
                     </button>
                     {showRollPicker && (
                       <div className="border-t border-[#F0F0F0] p-3 space-y-3">
-                        <input type="text" value={wizardSearch} onChange={e => setWizardSearch(e.target.value)}
+                        <input type="text" value={wizardSearch}
+                          onChange={e => { setWizardSearch(e.target.value); searchWizardRolls(e.target.value); }}
                           placeholder="Buscar por consecutivo, referencia..."
                           className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
                           autoFocus />
 
-                        {wizardLoading ? (
+                        {wizardSearch.trim() === '' && wizardLoading ? (
                           <div className="py-10 text-center text-gray-400 text-sm">Cargando rollos...</div>
-                        ) : filteredWizardRolls.length === 0 ? (
+                        ) : wizardSearch.trim() !== '' && wizardSearchLoading ? (
+                          <div className="py-10 text-center text-gray-400 text-sm">Buscando...</div>
+                        ) : pickerRolls.length === 0 ? (
                           <div className="py-8 text-center text-gray-400 text-sm">
-                            {wizardRolls.length === 0 ? 'No hay rollos disponibles' : 'Sin resultados para esa búsqueda'}
+                            {wizardSearch.trim() ? 'Sin resultados para esa búsqueda' : 'No hay rollos disponibles'}
                           </div>
                         ) : (
                           <div className="max-h-72 overflow-y-auto">
                             {/* Completos */}
-                            {filteredWizardRolls.some(r => !r.isRemnant) && (
+                            {pickerRolls.some(r => !r.isRemnant) && (
                               <div className="text-[10px] text-gray-400 uppercase tracking-wide px-1 py-1.5 font-medium border-b border-[#F0F0F0] sticky top-0 bg-white">
                                 Rollos completos
                               </div>
                             )}
-                            {filteredWizardRolls.filter(r => !r.isRemnant).map(r => {
+                            {pickerRolls.filter(r => !r.isRemnant).map(r => {
                               const isBlackout = isBlackoutProduct(r.category.name);
                               const ref = formatRef(r.product.code, isBlackout);
                               const color = rollColor(r);
@@ -1332,12 +1375,12 @@ export default function InventoryClient({
                             })}
 
                             {/* Remanentes */}
-                            {filteredWizardRolls.some(r => r.isRemnant) && (
+                            {pickerRolls.some(r => r.isRemnant) && (
                               <div className="text-[10px] text-gray-400 uppercase tracking-wide px-1 py-1.5 font-medium border-b border-[#F0F0F0] sticky top-0 bg-white mt-3">
                                 Remanentes
                               </div>
                             )}
-                            {filteredWizardRolls.filter(r => r.isRemnant).map(r => {
+                            {pickerRolls.filter(r => r.isRemnant).map(r => {
                               const isBlackout = isBlackoutProduct(r.category.name);
                               const ref = formatRef(r.product.code, isBlackout);
                               const color = rollColor(r);
@@ -1483,6 +1526,8 @@ export default function InventoryClient({
                       setExitStep('cart');
                       setShowRollPicker(true);
                       setSelectedRolls([]);
+                      setWizardSearch(''); setWizardSearchResults([]);
+                      if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
                       setExitClient(''); setExitClientName('');
                       setExitDiscount(''); setExitNotes('');
                       setRollExitTypes({}); setRollMeters({});
