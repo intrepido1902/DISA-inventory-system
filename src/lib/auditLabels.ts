@@ -44,6 +44,7 @@ export const ACTION_COLORS: Record<string, string> = {
 
 const FIELD_LABELS: Record<string, string> = {
   currentMeters: 'Metros actuales',
+  metersSold: 'Metros vendidos',
   initialMeters: 'Metros iniciales',
   status: 'Estado del rollo',
   isRemnant: 'Es remanente',
