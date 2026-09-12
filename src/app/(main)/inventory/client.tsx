@@ -109,7 +109,7 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
   );
 }
 
-type ExitStep = 'roll-select' | 'confirm' | 'success';
+type ExitStep = 'cart' | 'success';
 
 interface SaleResultRoll {
   roll: Roll;
@@ -200,7 +200,8 @@ export default function InventoryClient({
 
   // ── Exit modal state ─────────────────────────────────────────────────────
   const [showExit, setShowExit] = useState(openExitModal);
-  const [exitStep, setExitStep] = useState<ExitStep>('roll-select');
+  const [exitStep, setExitStep] = useState<ExitStep>('cart');
+  const [showRollPicker, setShowRollPicker] = useState(true);
   const [wizardRolls, setWizardRolls] = useState<Roll[]>([]);
   const [wizardLoading, setWizardLoading] = useState(false);
   const [wizardSearch, setWizardSearch] = useState('');
@@ -461,6 +462,16 @@ export default function InventoryClient({
     });
   }, [selectedClient, selectedRolls]);
 
+  // Auto-suggest a discount from any defective roll added to the cart — only while the user
+  // hasn't typed one manually (single-screen cart has no "continue" step to trigger this on).
+  useEffect(() => {
+    if (exitDiscount) return;
+    const pcts = selectedRolls
+      .filter(r => r.hasDefect && r.defectDiscountPct !== null)
+      .map(r => r.defectDiscountPct as number);
+    if (pcts.length > 0) setExitDiscount(String(Math.max(...pcts)));
+  }, [selectedRolls, exitDiscount]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   function clearFilters() {
@@ -478,17 +489,26 @@ export default function InventoryClient({
     setWizardLoading(true);
     setWizardRolls([]);
     try {
-      const res = await fetch('/api/inventory?limit=500');
-      const json = await res.json();
-      const allRolls: Roll[] = json.data ?? [];
-      const available = allRolls
-        .filter(r => r.status === 'ACTIVE' || r.status === 'REMNANT')
-        .sort((a, b) => {
-          if (!a.isRemnant && b.isRemnant) return -1;
-          if (a.isRemnant && !b.isRemnant) return 1;
-          if (a.isRemnant && b.isRemnant) return a.currentMeters - b.currentMeters;
-          return (a.disaNumber ?? a.rollNumber).localeCompare(b.disaNumber ?? b.rollNumber);
-        });
+      // Fetch ACTIVE and REMNANT separately so depleted/written-off rolls don't
+      // consume the per-page limit and hide available inventory.
+      const [resA, resR] = await Promise.all([
+        fetch('/api/inventory?limit=500&status=ACTIVE'),
+        fetch('/api/inventory?limit=500&status=REMNANT'),
+      ]);
+      const [jsonA, jsonR] = await Promise.all([resA.json(), resR.json()]);
+      const allRolls: Roll[] = [...(jsonA.data ?? []), ...(jsonR.data ?? [])];
+      // Deduplicate (shouldn't happen, but safe)
+      const seen = new Set<number>();
+      const available = allRolls.filter(r => {
+        if (seen.has(r.id)) return false;
+        seen.add(r.id);
+        return true;
+      }).sort((a, b) => {
+        if (!a.isRemnant && b.isRemnant) return -1;
+        if (a.isRemnant && !b.isRemnant) return 1;
+        if (a.isRemnant && b.isRemnant) return a.currentMeters - b.currentMeters;
+        return (a.disaNumber ?? a.rollNumber).localeCompare(b.disaNumber ?? b.rollNumber);
+      });
       setWizardRolls(available);
     } catch {
       setToast({ message: 'Error al cargar rollos', type: 'error' });
@@ -499,8 +519,9 @@ export default function InventoryClient({
 
   function openExitFlow(preselectedRoll?: Roll) {
     setShowExit(true);
-    setExitStep('roll-select');
+    setExitStep('cart');
     setSelectedRolls(preselectedRoll ? [preselectedRoll] : []);
+    setShowRollPicker(!preselectedRoll); // open the picker immediately when no roll preselected
     setWizardSearch('');
     setExitClient(''); setExitClientName('');
     setExitDiscount(''); setExitNotes('');
@@ -513,7 +534,8 @@ export default function InventoryClient({
 
   function closeExit() {
     setShowExit(false);
-    setExitStep('roll-select');
+    setExitStep('cart');
+    setShowRollPicker(true);
     setWizardRolls([]); setWizardSearch('');
     setSelectedRolls([]);
     setExitClient(''); setExitClientName('');
@@ -627,6 +649,7 @@ export default function InventoryClient({
         total: data.total,
         registradoPor: userName,
       });
+      setShowRollPicker(false);
       setExitStep('success');
     } catch {
       setToast({ message: 'Error de conexión', type: 'error' });
@@ -1084,7 +1107,7 @@ export default function InventoryClient({
       </div>
 
       {/* ══════════════════════════════════════════════════
-          EXIT MODAL — WIZARD MULTI-ROLLO
+          EXIT MODAL — CARRITO DE SALIDA (pantalla única)
       ══════════════════════════════════════════════════ */}
       {showExit && (
         <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center sm:p-4" onClick={exitStep === 'success' ? undefined : closeExit}>
@@ -1097,8 +1120,11 @@ export default function InventoryClient({
                   {exitStep === 'success' ? 'Venta registrada' : 'Nueva salida'}
                 </h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {exitStep === 'roll-select' && 'Paso 1 — Selecciona los rollos'}
-                  {exitStep === 'confirm' && 'Paso 2 — Detalle de la venta'}
+                  {exitStep === 'cart' && (
+                    selectedRolls.length === 0
+                      ? 'Agrega rollos al carrito'
+                      : `${selectedRolls.length} rollo${selectedRolls.length !== 1 ? 's' : ''} en el carrito`
+                  )}
                   {exitStep === 'success' && '✓ Completado exitosamente'}
                 </p>
               </div>
@@ -1107,126 +1133,11 @@ export default function InventoryClient({
 
             <div className="px-6 py-5">
 
-              {/* ── PASO 1 — Selección de rollos ── */}
-              {exitStep === 'roll-select' && (
-                <div className="space-y-4">
-                  <input type="text" value={wizardSearch} onChange={e => setWizardSearch(e.target.value)}
-                    placeholder="Buscar por consecutivo, referencia..."
-                    className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
-                    autoFocus />
-
-                  {wizardLoading ? (
-                    <div className="py-10 text-center text-gray-400 text-sm">Cargando rollos...</div>
-                  ) : filteredWizardRolls.length === 0 ? (
-                    <div className="py-8 text-center text-gray-400 text-sm">
-                      {wizardRolls.length === 0 ? 'No hay rollos disponibles' : 'Sin resultados para esa búsqueda'}
-                    </div>
-                  ) : (
-                    <div className="max-h-72 overflow-y-auto">
-                      {/* Completos */}
-                      {filteredWizardRolls.some(r => !r.isRemnant) && (
-                        <div className="text-[10px] text-gray-400 uppercase tracking-wide px-1 py-1.5 font-medium border-b border-[#F0F0F0] sticky top-0 bg-white">
-                          Rollos completos
-                        </div>
-                      )}
-                      {filteredWizardRolls.filter(r => !r.isRemnant).map(r => {
-                        const isBlackout = isBlackoutProduct(r.category.name);
-                        const ref = formatRef(r.product.code, isBlackout);
-                        const color = rollColor(r);
-                        const isSelected = selectedRolls.some(s => s.id === r.id);
-                        return (
-                          <button key={r.id} type="button" onClick={() => toggleRoll(r)}
-                            className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs mt-1.5 hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${isSelected ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
-                            <span className={`col-span-1 text-center text-base ${isSelected ? 'text-gray-900' : 'text-gray-200'}`}>✓</span>
-                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{displayRollNumber(r.rollNumber)}</span>
-                            <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
-                            <span className="col-span-3 text-gray-500 truncate">{color}</span>
-                            <span className="col-span-3 text-right">
-                              {r.hasDefect && <span className="inline-block text-[9px] bg-orange-100 text-orange-700 rounded px-1 mr-1">⚠️ Def.</span>}
-                              <span className="font-semibold text-green-700">{r.currentMeters}m</span>
-                            </span>
-                          </button>
-                        );
-                      })}
-
-                      {/* Remanentes */}
-                      {filteredWizardRolls.some(r => r.isRemnant) && (
-                        <div className="text-[10px] text-gray-400 uppercase tracking-wide px-1 py-1.5 font-medium border-b border-[#F0F0F0] sticky top-0 bg-white mt-3">
-                          Remanentes
-                        </div>
-                      )}
-                      {filteredWizardRolls.filter(r => r.isRemnant).map(r => {
-                        const isBlackout = isBlackoutProduct(r.category.name);
-                        const ref = formatRef(r.product.code, isBlackout);
-                        const color = rollColor(r);
-                        const isSelected = selectedRolls.some(s => s.id === r.id);
-                        return (
-                          <button key={r.id} type="button" onClick={() => toggleRoll(r)}
-                            className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs mt-1.5 hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${isSelected ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
-                            <span className={`col-span-1 text-center text-base ${isSelected ? 'text-gray-900' : 'text-gray-200'}`}>✓</span>
-                            <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{displayRollNumber(r.rollNumber)}</span>
-                            <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
-                            <span className="col-span-3 text-gray-500 truncate">{color}</span>
-                            <span className="col-span-3 text-right">
-                              {r.hasDefect && <span className="inline-block text-[9px] bg-orange-100 text-orange-700 rounded px-1 mr-1">⚠️ Def.</span>}
-                              <span className="font-semibold text-amber-600">{r.currentMeters}m</span>
-                              <span className="text-gray-300"> /{r.initialMeters}m</span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between gap-3 pt-1 border-t border-[#F0F0F0]">
-                    <span className="text-sm text-gray-500">
-                      {selectedRolls.length === 0
-                        ? 'Ningún rollo seleccionado'
-                        : `${selectedRolls.length} rollo${selectedRolls.length !== 1 ? 's' : ''} seleccionado${selectedRolls.length !== 1 ? 's' : ''}`}
-                    </span>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={closeExit}
-                        className="border border-[#E5E5E5] rounded px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
-                        Cancelar
-                      </button>
-                      <button type="button"
-                        onClick={() => {
-                          setExitStep('confirm');
-                          if (!exitDiscount) {
-                            const pcts = selectedRolls
-                              .filter(r => r.hasDefect && r.defectDiscountPct !== null)
-                              .map(r => r.defectDiscountPct as number);
-                            if (pcts.length > 0) setExitDiscount(String(Math.max(...pcts)));
-                          }
-                        }}
-                        disabled={selectedRolls.length === 0}
-                        className="bg-[#0A0A0A] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[#1A1A1A] disabled:opacity-40">
-                        Continuar →
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── PASO 2 — Detalle de la venta ── */}
-              {exitStep === 'confirm' && (
+              {/* ── CARRITO — pantalla única ── */}
+              {exitStep === 'cart' && (
                 <div className="space-y-4">
 
-                  {/* Resumen de rollos seleccionados */}
-                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500 flex items-center justify-between">
-                    <span>
-                      {selectedRolls.length} rollo{selectedRolls.length !== 1 ? 's' : ''}:{' '}
-                      {selectedRolls.map(r => r.disaNumber ?? displayRollNumber(r.rollNumber)).join(', ')}
-                    </span>
-                    <button type="button" onClick={() => {
-                      setRollPrices({}); setRollPriceLocked({}); setRollPriceHints({});
-                      setExitStep('roll-select');
-                    }} className="text-blue-500 hover:underline ml-2 shrink-0">
-                      Modificar
-                    </button>
-                  </div>
-
-                  {/* Cliente */}
+                  {/* ① Cliente */}
                   <div>
                     <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
                       Cliente <span className="text-red-400">*</span>
@@ -1259,56 +1170,61 @@ export default function InventoryClient({
                     <p className="text-xs text-gray-400 text-center py-1">Cargando precios...</p>
                   )}
 
-                  {/* Per-roll cards */}
-                  <div className="space-y-3">
-                    {selectedRolls.map(roll => {
-                      const isBlackout = isBlackoutProduct(roll.category.name);
-                      const ref = formatRef(roll.product.code, isBlackout);
-                      const color = rollColor(roll);
-                      const et = rollExitTypes[roll.id] ?? 'EXIT_PARTIAL';
-                      const locked = rollPriceLocked[roll.id] ?? false;
-                      const hint = rollPriceHints[roll.id] ?? '';
-                      const price = rollPrices[roll.id] ?? '';
-                      const metersForCalc = et === 'EXIT_FULL'
-                        ? roll.currentMeters
-                        : parseFloat(rollMeters[roll.id] || '0');
-                      const rowSubtotal = metersForCalc * parseFloat(price || '0');
+                  {/* ② Carrito — rollos agregados, con controles inline */}
+                  {selectedRolls.length === 0 ? (
+                    <div className="text-center py-6 text-sm text-gray-400 border border-dashed border-[#E5E5E5] rounded-lg">
+                      Aún no has agregado rollos
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedRolls.map(roll => {
+                        const isBlackout = isBlackoutProduct(roll.category.name);
+                        const ref = formatRef(roll.product.code, isBlackout);
+                        const color = rollColor(roll);
+                        const et = rollExitTypes[roll.id] ?? 'EXIT_PARTIAL';
+                        const locked = rollPriceLocked[roll.id] ?? false;
+                        const hint = rollPriceHints[roll.id] ?? '';
+                        const price = rollPrices[roll.id] ?? '';
+                        const metersForCalc = et === 'EXIT_FULL'
+                          ? roll.currentMeters
+                          : parseFloat(rollMeters[roll.id] || '0');
+                        const rowSubtotal = metersForCalc * parseFloat(price || '0');
 
-                      return (
-                        <div key={roll.id} className="border border-[#E5E5E5] rounded-lg p-3 space-y-2.5">
-                          {/* Roll header */}
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <span className="font-mono font-bold text-sm text-gray-900">
-                                {roll.disaNumber ?? displayRollNumber(roll.rollNumber)}
-                              </span>
-                              <span className="text-xs text-gray-400 ml-2">
-                                {ref} · {color} · {roll.product.width}cm
-                              </span>
+                        return (
+                          <div key={roll.id} className="border border-[#E5E5E5] rounded-lg p-3 space-y-2.5">
+                            {/* Roll header */}
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <span className="font-mono font-bold text-sm text-gray-900">
+                                  {roll.disaNumber ?? displayRollNumber(roll.rollNumber)}
+                                </span>
+                                <span className="text-xs text-gray-400 ml-2">
+                                  {ref} · {color} · {roll.product.width}cm
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className={`text-xs font-semibold ${roll.isRemnant ? 'text-amber-600' : 'text-green-700'}`}>
+                                  {roll.currentMeters}m disp.
+                                </span>
+                                <button type="button" onClick={() => removeRoll(roll.id)}
+                                  className="text-gray-300 hover:text-red-400 text-sm transition-colors" title="Quitar rollo">
+                                  ✕
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className={`text-xs font-semibold ${roll.isRemnant ? 'text-amber-600' : 'text-green-700'}`}>
-                                {roll.currentMeters}m disp.
-                              </span>
-                              <button type="button" onClick={() => removeRoll(roll.id)}
-                                className="text-gray-300 hover:text-red-400 text-sm transition-colors" title="Quitar rollo">
-                                ✕
-                              </button>
-                            </div>
-                          </div>
 
-                          {/* Defect notice */}
-                          {roll.hasDefect && (
-                            <div className="bg-orange-50 border border-orange-200 rounded px-2.5 py-1.5 text-xs text-orange-800">
-                              ⚠️ <span className="font-semibold">Defecto aprobado</span>
-                              {roll.defectDiscountPct && <> · Descuento sugerido: <span className="font-bold">{roll.defectDiscountPct}%</span></>}
-                              {roll.defectNote && <> · {roll.defectNote}</>}
-                            </div>
-                          )}
+                            {/* Defect notice */}
+                            {roll.hasDefect && (
+                              <div className="bg-orange-50 border border-orange-200 rounded px-2.5 py-1.5 text-xs text-orange-800">
+                                ⚠️ <span className="font-semibold">Defecto aprobado</span>
+                                {roll.defectDiscountPct && <> · Descuento sugerido: <span className="font-bold">{roll.defectDiscountPct}%</span></>}
+                                {roll.defectNote && <> · {roll.defectNote}</>}
+                              </div>
+                            )}
 
-                          {/* Metros + precio — todos los clientes pueden elegir completo o parcial;
-                              sellsByRoll solo preselecciona "Completo" como valor por defecto. */}
-                          <div className="grid grid-cols-2 gap-2">
+                            {/* Metros + precio — todos los clientes pueden elegir completo o parcial;
+                                sellsByRoll solo preselecciona "Completo" como valor por defecto. */}
+                            <div className="grid grid-cols-2 gap-2">
                               {/* Metros */}
                               <div>
                                 <div className="flex gap-1 mb-1">
@@ -1353,18 +1269,101 @@ export default function InventoryClient({
                               </div>
                             </div>
 
-                          {/* Row subtotal */}
-                          {rowSubtotal > 0 && (
-                            <div className="text-xs text-right text-gray-400">
-                              Subtotal: <span className="font-semibold text-gray-700">{formatCOP(rowSubtotal)}</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                            {/* Row subtotal */}
+                            {rowSubtotal > 0 && (
+                              <div className="text-xs text-right text-gray-400">
+                                Subtotal: <span className="font-semibold text-gray-700">{formatCOP(rowSubtotal)}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* ③ Agregar rollos — sección colapsable, disponible en cualquier momento */}
+                  <div className="border border-[#E5E5E5] rounded-lg overflow-hidden">
+                    <button type="button" onClick={() => setShowRollPicker(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                      <span className="font-medium">{showRollPicker ? '− Ocultar rollos disponibles' : '+ Agregar rollos'}</span>
+                      {selectedRolls.length === 0 && !showRollPicker && (
+                        <span className="text-xs text-red-400">Selecciona al menos un rollo</span>
+                      )}
+                    </button>
+                    {showRollPicker && (
+                      <div className="border-t border-[#F0F0F0] p-3 space-y-3">
+                        <input type="text" value={wizardSearch} onChange={e => setWizardSearch(e.target.value)}
+                          placeholder="Buscar por consecutivo, referencia..."
+                          className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
+                          autoFocus />
+
+                        {wizardLoading ? (
+                          <div className="py-10 text-center text-gray-400 text-sm">Cargando rollos...</div>
+                        ) : filteredWizardRolls.length === 0 ? (
+                          <div className="py-8 text-center text-gray-400 text-sm">
+                            {wizardRolls.length === 0 ? 'No hay rollos disponibles' : 'Sin resultados para esa búsqueda'}
+                          </div>
+                        ) : (
+                          <div className="max-h-72 overflow-y-auto">
+                            {/* Completos */}
+                            {filteredWizardRolls.some(r => !r.isRemnant) && (
+                              <div className="text-[10px] text-gray-400 uppercase tracking-wide px-1 py-1.5 font-medium border-b border-[#F0F0F0] sticky top-0 bg-white">
+                                Rollos completos
+                              </div>
+                            )}
+                            {filteredWizardRolls.filter(r => !r.isRemnant).map(r => {
+                              const isBlackout = isBlackoutProduct(r.category.name);
+                              const ref = formatRef(r.product.code, isBlackout);
+                              const color = rollColor(r);
+                              const isSelected = selectedRolls.some(s => s.id === r.id);
+                              return (
+                                <button key={r.id} type="button" onClick={() => toggleRoll(r)}
+                                  className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs mt-1.5 hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${isSelected ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
+                                  <span className={`col-span-1 text-center text-base ${isSelected ? 'text-gray-900' : 'text-gray-200'}`}>✓</span>
+                                  <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{displayRollNumber(r.rollNumber)}</span>
+                                  <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
+                                  <span className="col-span-3 text-gray-500 truncate">{color}</span>
+                                  <span className="col-span-3 text-right">
+                                    {r.hasDefect && <span className="inline-block text-[9px] bg-orange-100 text-orange-700 rounded px-1 mr-1">⚠️ Def.</span>}
+                                    <span className="font-semibold text-green-700">{r.currentMeters}m</span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+
+                            {/* Remanentes */}
+                            {filteredWizardRolls.some(r => r.isRemnant) && (
+                              <div className="text-[10px] text-gray-400 uppercase tracking-wide px-1 py-1.5 font-medium border-b border-[#F0F0F0] sticky top-0 bg-white mt-3">
+                                Remanentes
+                              </div>
+                            )}
+                            {filteredWizardRolls.filter(r => r.isRemnant).map(r => {
+                              const isBlackout = isBlackoutProduct(r.category.name);
+                              const ref = formatRef(r.product.code, isBlackout);
+                              const color = rollColor(r);
+                              const isSelected = selectedRolls.some(s => s.id === r.id);
+                              return (
+                                <button key={r.id} type="button" onClick={() => toggleRoll(r)}
+                                  className={`w-full grid grid-cols-12 gap-2 items-center border rounded-lg px-3 py-2.5 text-xs mt-1.5 hover:border-gray-400 hover:bg-gray-50 transition-colors text-left ${isSelected ? 'border-gray-900 bg-gray-50' : 'border-[#E5E5E5]'}`}>
+                                  <span className={`col-span-1 text-center text-base ${isSelected ? 'text-gray-900' : 'text-gray-200'}`}>✓</span>
+                                  <span className="col-span-2 font-mono font-bold text-gray-800 truncate">{displayRollNumber(r.rollNumber)}</span>
+                                  <span className="col-span-3 font-mono font-semibold text-gray-700 truncate">{ref}</span>
+                                  <span className="col-span-3 text-gray-500 truncate">{color}</span>
+                                  <span className="col-span-3 text-right">
+                                    {r.hasDefect && <span className="inline-block text-[9px] bg-orange-100 text-orange-700 rounded px-1 mr-1">⚠️ Def.</span>}
+                                    <span className="font-semibold text-amber-600">{r.currentMeters}m</span>
+                                    <span className="text-gray-300"> /{r.initialMeters}m</span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Descuento */}
+                  {/* ④ Descuento */}
                   {canManage && (
                     <div>
                       <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">
@@ -1377,7 +1376,7 @@ export default function InventoryClient({
                     </div>
                   )}
 
-                  {/* Resumen en tiempo real */}
+                  {/* ⑤ Resumen en tiempo real */}
                   {exitCalc.subtotalGeneral > 0 && (
                     <div className="bg-gray-50 border border-[#E5E5E5] rounded-lg px-4 py-3 text-sm space-y-1.5">
                       {exitCalc.disc > 0 && (
@@ -1399,7 +1398,7 @@ export default function InventoryClient({
                     </div>
                   )}
 
-                  {/* Notas */}
+                  {/* ⑥ Notas */}
                   <div>
                     <label className="block text-xs font-medium text-gray-700 uppercase tracking-wide mb-1.5">Notas</label>
                     <textarea value={exitNotes} onChange={e => setExitNotes(e.target.value)} rows={2}
@@ -1407,14 +1406,11 @@ export default function InventoryClient({
                       placeholder="Observaciones opcionales..." />
                   </div>
 
+                  {/* ⑦ Confirmar */}
                   <div className="flex gap-3 pt-1">
-                    <button type="button"
-                      onClick={() => {
-                        setRollPrices({}); setRollPriceLocked({}); setRollPriceHints({});
-                        setExitStep('roll-select');
-                      }}
+                    <button type="button" onClick={closeExit}
                       className="border border-[#E5E5E5] rounded px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50">
-                      ← Volver
+                      Cancelar
                     </button>
                     <button type="button" onClick={handleExit}
                       disabled={exitLoading || !exitClient || selectedRolls.length === 0}
@@ -1427,7 +1423,7 @@ export default function InventoryClient({
                 </div>
               )}
 
-              {/* ── PASO 3 — Éxito ── */}
+              {/* ── Éxito ── */}
               {exitStep === 'success' && saleResult && (
                 <div className="space-y-5">
                   <div className="text-center py-2">
@@ -1484,7 +1480,8 @@ export default function InventoryClient({
                   <div className="flex gap-3">
                     <button type="button" onClick={() => {
                       setSaleResult(null);
-                      setExitStep('roll-select');
+                      setExitStep('cart');
+                      setShowRollPicker(true);
                       setSelectedRolls([]);
                       setExitClient(''); setExitClientName('');
                       setExitDiscount(''); setExitNotes('');
