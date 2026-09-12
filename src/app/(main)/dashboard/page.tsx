@@ -62,7 +62,7 @@ async function getDashboardData(role: string) {
     // roll's share instead of disappearing (or over-counting) entirely.
     isOwner
       ? (db as any).from('Movement').select('total')
-          .in('type', ['EXIT_FULL', 'EXIT_PARTIAL']).neq('reverted', true)
+          .in('type', ['EXIT_FULL', 'EXIT_PARTIAL']).neq('reverted', true).limit(10000)
       : Promise.resolve({ data: [] }),
   ]);
 
