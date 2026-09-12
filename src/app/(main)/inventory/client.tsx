@@ -207,6 +207,10 @@ export default function InventoryClient({
   const [wizardSearch, setWizardSearch] = useState('');
   const [wizardSearchResults, setWizardSearchResults] = useState<Roll[]>([]);
   const [wizardSearchLoading, setWizardSearchLoading] = useState(false);
+  const [wizardRollNumber, setWizardRollNumber] = useState('');
+  const [wizardDisaNumber, setWizardDisaNumber] = useState('');
+  const [wizardColor, setWizardColor] = useState('');
+  const [wizardWidth, setWizardWidth] = useState('');
   const wizardSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedRolls, setSelectedRolls] = useState<Roll[]>([]);
 
@@ -275,13 +279,15 @@ export default function InventoryClient({
     [products],
   );
 
-  // Rollos a mostrar en el picker: búsqueda contra el API mientras el usuario escribe,
-  // lista precargada cuando el buscador está vacío — en ambos casos, sin los que ya
-  // están en el carrito.
+  // Rollos a mostrar en el picker: búsqueda contra el API mientras haya algún filtro activo
+  // (referencia, consecutivo, No. Rollo, color o ancho), lista precargada cuando no hay
+  // ninguno — en ambos casos, sin los que ya están en el carrito.
+  const pickerHasFilters = !!(wizardSearch.trim() || wizardRollNumber.trim() ||
+    wizardDisaNumber.trim() || wizardColor || wizardWidth);
   const pickerRolls = useMemo(() => {
-    const source = wizardSearch.trim() ? wizardSearchResults : wizardRolls;
+    const source = pickerHasFilters ? wizardSearchResults : wizardRolls;
     return source.filter(r => !selectedRolls.some(s => s.id === r.id));
-  }, [wizardSearch, wizardSearchResults, wizardRolls, selectedRolls]);
+  }, [pickerHasFilters, wizardSearchResults, wizardRolls, selectedRolls]);
 
   // Multi-roll real-time calculation
   const exitCalc = useMemo(() => {
@@ -518,40 +524,46 @@ export default function InventoryClient({
     }
   }
 
-  // Búsqueda en el servidor mientras el usuario escribe en el picker del carrito — la lista
-  // precargada (wizardRolls) puede no traer el rollo buscado, así que se busca por referencia
-  // (search) y por consecutivo/No. Rollo (rollNumber) en paralelo, para ACTIVE y REMNANT.
-  async function searchWizardRolls(term: string) {
+  // Búsqueda en el servidor mientras el usuario escribe/filtra en el picker del carrito — la
+  // lista precargada (wizardRolls) puede no traer el rollo buscado, así que se busca por
+  // referencia, consecutivo, No. Rollo, color y ancho, para ACTIVE y REMNANT en paralelo.
+  async function searchWizardRolls(opts: {
+    search?: string; rollNumber?: string; disaNumber?: string;
+    color?: string; width?: string;
+  }) {
     if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
-    if (!term.trim()) {
-      setWizardSearchResults([]);
-      return;
-    }
+    const { search = wizardSearch, rollNumber = wizardRollNumber,
+            disaNumber = wizardDisaNumber, color = wizardColor, width = wizardWidth } = opts;
+    const hasFilters = search.trim() || rollNumber.trim() || disaNumber.trim() || color || width;
+    if (!hasFilters) { setWizardSearchResults([]); return; }
     wizardSearchRef.current = setTimeout(async () => {
       setWizardSearchLoading(true);
       try {
-        const [r1, r2, r3, r4] = await Promise.all([
-          fetch('/api/inventory?' + new URLSearchParams({ search: term, status: 'ACTIVE', limit: '20' })).then(r => r.json()),
-          fetch('/api/inventory?' + new URLSearchParams({ search: term, status: 'REMNANT', limit: '20' })).then(r => r.json()),
-          fetch('/api/inventory?' + new URLSearchParams({ rollNumber: term, status: 'ACTIVE', limit: '10' })).then(r => r.json()),
-          fetch('/api/inventory?' + new URLSearchParams({ rollNumber: term, status: 'REMNANT', limit: '10' })).then(r => r.json()),
+        function buildParams(status: string) {
+          const p: Record<string, string> = { status, limit: '100' };
+          if (search.trim()) p.search = search.trim();
+          if (rollNumber.trim()) p.rollNumber = rollNumber.trim();
+          if (disaNumber.trim()) p.disaNumber = disaNumber.trim();
+          if (color) p.color = color;
+          if (width) p.width = width;
+          return new URLSearchParams(p).toString();
+        }
+        const [r1, r2] = await Promise.all([
+          fetch('/api/inventory?' + buildParams('ACTIVE')).then(r => r.json()),
+          fetch('/api/inventory?' + buildParams('REMNANT')).then(r => r.json()),
         ]);
-        const all: Roll[] = [
-          ...(r1.data ?? []), ...(r2.data ?? []),
-          ...(r3.data ?? []), ...(r4.data ?? []),
-        ];
+        const all: Roll[] = [...(r1.data ?? []), ...(r2.data ?? [])];
         const seen = new Set<number>();
-        const deduped = all.filter(r => {
-          if (seen.has(r.id)) return false;
-          seen.add(r.id);
-          return true;
+        const deduped = all.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+        deduped.sort((a, b) => {
+          if (!a.isRemnant && b.isRemnant) return -1;
+          if (a.isRemnant && !b.isRemnant) return 1;
+          if (a.isRemnant && b.isRemnant) return a.currentMeters - b.currentMeters;
+          return (a.disaNumber ?? a.rollNumber).localeCompare(b.disaNumber ?? b.rollNumber);
         });
         setWizardSearchResults(deduped);
-      } catch {
-        setWizardSearchResults([]);
-      } finally {
-        setWizardSearchLoading(false);
-      }
+      } catch { setWizardSearchResults([]); }
+      finally { setWizardSearchLoading(false); }
     }, 350);
   }
 
@@ -561,6 +573,7 @@ export default function InventoryClient({
     setSelectedRolls(preselectedRoll ? [preselectedRoll] : []);
     setShowRollPicker(!preselectedRoll); // open the picker immediately when no roll preselected
     setWizardSearch(''); setWizardSearchResults([]);
+    setWizardRollNumber(''); setWizardDisaNumber(''); setWizardColor(''); setWizardWidth('');
     if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
     setExitClient(''); setExitClientName('');
     setExitDiscount(''); setExitNotes('');
@@ -576,6 +589,7 @@ export default function InventoryClient({
     setExitStep('cart');
     setShowRollPicker(true);
     setWizardRolls([]); setWizardSearch(''); setWizardSearchResults([]);
+    setWizardRollNumber(''); setWizardDisaNumber(''); setWizardColor(''); setWizardWidth('');
     if (wizardSearchRef.current) clearTimeout(wizardSearchRef.current);
     setSelectedRolls([]);
     setExitClient(''); setExitClientName('');
@@ -1332,19 +1346,55 @@ export default function InventoryClient({
                     </button>
                     {showRollPicker && (
                       <div className="border-t border-[#F0F0F0] p-3 space-y-3">
-                        <input type="text" value={wizardSearch}
-                          onChange={e => { setWizardSearch(e.target.value); searchWizardRolls(e.target.value); }}
-                          placeholder="Buscar por consecutivo, referencia..."
-                          className="w-full border border-[#E5E5E5] rounded px-3 py-2.5 text-sm focus:outline-none focus:border-gray-400"
-                          autoFocus />
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input type="text" value={wizardSearch}
+                              onChange={e => { setWizardSearch(e.target.value); searchWizardRolls({ search: e.target.value }); }}
+                              placeholder="Referencia..."
+                              className="flex-1 border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                              autoFocus />
+                            <input type="text" value={wizardRollNumber}
+                              onChange={e => { setWizardRollNumber(e.target.value); searchWizardRolls({ rollNumber: e.target.value }); }}
+                              placeholder="Consecutivo..."
+                              className="w-32 border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
+                          </div>
+                          <div className="flex gap-2">
+                            <input type="text" value={wizardDisaNumber}
+                              onChange={e => { setWizardDisaNumber(e.target.value); searchWizardRolls({ disaNumber: e.target.value }); }}
+                              placeholder="No. Rollo..."
+                              className="flex-1 border border-[#E5E5E5] rounded px-3 py-2 text-sm focus:outline-none focus:border-gray-400" />
+                            <select value={wizardColor}
+                              onChange={e => { setWizardColor(e.target.value); searchWizardRolls({ color: e.target.value }); }}
+                              className="flex-1 border border-[#E5E5E5] bg-white rounded px-2 py-2 text-sm focus:outline-none focus:border-gray-400">
+                              <option value="">Color: Todos</option>
+                              {uniqueColors.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <select value={wizardWidth}
+                              onChange={e => { setWizardWidth(e.target.value); searchWizardRolls({ width: e.target.value }); }}
+                              className="flex-1 border border-[#E5E5E5] bg-white rounded px-2 py-2 text-sm focus:outline-none focus:border-gray-400">
+                              <option value="">Ancho: Todos</option>
+                              {uniqueWidths.map(w => <option key={w} value={String(w)}>{w} cm</option>)}
+                            </select>
+                          </div>
+                          {pickerHasFilters && (
+                            <button type="button"
+                              onClick={() => {
+                                setWizardSearch(''); setWizardRollNumber(''); setWizardDisaNumber('');
+                                setWizardColor(''); setWizardWidth(''); setWizardSearchResults([]);
+                              }}
+                              className="text-xs text-gray-400 hover:text-gray-700 underline">
+                              ✕ Limpiar filtros
+                            </button>
+                          )}
+                        </div>
 
-                        {wizardSearch.trim() === '' && wizardLoading ? (
+                        {!pickerHasFilters && wizardLoading ? (
                           <div className="py-10 text-center text-gray-400 text-sm">Cargando rollos...</div>
-                        ) : wizardSearch.trim() !== '' && wizardSearchLoading ? (
+                        ) : pickerHasFilters && wizardSearchLoading ? (
                           <div className="py-10 text-center text-gray-400 text-sm">Buscando...</div>
                         ) : pickerRolls.length === 0 ? (
                           <div className="py-8 text-center text-gray-400 text-sm">
-                            {wizardSearch.trim() ? 'Sin resultados para esa búsqueda' : 'No hay rollos disponibles'}
+                            {pickerHasFilters ? 'Sin resultados para esos filtros' : 'No hay rollos disponibles'}
                           </div>
                         ) : (
                           <div className="max-h-72 overflow-y-auto">
