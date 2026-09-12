@@ -21,6 +21,7 @@ export interface AuditLogEnrichment {
   // Roll row could not be found (e.g. it was later deleted).
   rollConsecutivo: string | null;
   rollDisaNumber: string | null;
+  rollReference: string | null;
 }
 
 interface MovementCandidate {
@@ -58,13 +59,13 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
     logs.filter(l => l.entity === 'Roll').map(l => l.entityId)
   )];
 
-  const rollById = new Map<number, { rollNumber: string | null; disaNumber: string | null }>();
+  const rollById = new Map<number, { rollNumber: string | null; disaNumber: string | null; reference: string | null }>();
 
   if (rollEntityIds.length > 0) {
     const dbAny = db as any;
     const { data: rolls, error } = await dbAny
       .from('Roll')
-      .select('id, rollNumber, disaNumber')
+      .select('id, rollNumber, disaNumber, product:productId(code)')
       .in('id', rollEntityIds);
 
     if (error) console.error('[auditEnrich] Roll lookup error:', error);
@@ -73,6 +74,7 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
       rollById.set(r.id as number, {
         rollNumber: r.rollNumber ?? null,
         disaNumber: r.disaNumber ?? null,
+        reference: (r.product as any)?.code ?? null,
       });
     }
   }
@@ -109,9 +111,10 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
     const rollInfo = l.entity === 'Roll' ? rollById.get(l.entityId) : undefined;
     const rollConsecutivo = rollInfo?.rollNumber ?? null;
     const rollDisaNumber = rollInfo?.disaNumber ?? null;
+    const rollReference = rollInfo?.reference ?? null;
 
     if (!EXIT_ACTIONS.has(l.action)) {
-      return { ...l, clientName: null, saleTotal: null, voided: false, rollConsecutivo, rollDisaNumber };
+      return { ...l, clientName: null, saleTotal: null, voided: false, rollConsecutivo, rollDisaNumber, rollReference };
     }
 
     const candidates = candidatesByRoll.get(l.entityId) ?? [];
@@ -135,6 +138,7 @@ export async function enrichAuditLogs<T extends AuditLogBase>(
       voided: matched?.reverted ?? false,
       rollConsecutivo,
       rollDisaNumber,
+      rollReference,
     };
   });
 
