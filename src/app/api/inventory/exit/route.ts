@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
         action: calc.r.exitType,
         entity: 'Roll',
         entityId: Number(calc.r.rollId),
-        oldData: JSON.stringify({ currentMeters: calc.rd.currentMeters }),
+        oldData: JSON.stringify({ metersSold: calc.metersUsed }),
         newData: JSON.stringify({ currentMeters: calc.newMeters, status: calc.newStatus, pricePerMeter: calc.pricePerM, discount: discountPct }),
         createdAt: now,
       });
