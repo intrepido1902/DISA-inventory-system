@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       .select('saleId, rollId, meters')
       .in('type', ['EXIT_FULL', 'EXIT_PARTIAL'])
       .in('saleId', saleIds)
-      .eq('reverted', false);
+      .neq('reverted', true);
 
     // Aggregate per saleId
     const movMap = new Map<number, { rollCount: number; totalMeters: number }>();
