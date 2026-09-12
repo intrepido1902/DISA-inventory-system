@@ -27,6 +27,7 @@ const MOVEMENT_LABEL: Record<string, string> = {
   RETURN: 'Devolución',
   DEFECT_DISCOUNT: 'Defecto con descuento',
   DEFECT_REPLACEMENT: 'Defecto con reposición',
+  VOID_MOVEMENT: 'Anulación',
 };
 
 const MOVEMENT_EMOJI: Record<string, string> = {
@@ -38,6 +39,7 @@ const MOVEMENT_EMOJI: Record<string, string> = {
   RETURN: '↩️',
   DEFECT_DISCOUNT: '⚠️',
   DEFECT_REPLACEMENT: '🔄',
+  VOID_MOVEMENT: '⛔',
 };
 
 const MOVEMENT_COLOR: Record<string, string> = {
@@ -49,6 +51,7 @@ const MOVEMENT_COLOR: Record<string, string> = {
   RETURN: 'bg-green-100 text-green-700 border-green-200',
   DEFECT_DISCOUNT: 'bg-orange-100 text-orange-700 border-orange-200',
   DEFECT_REPLACEMENT: 'bg-purple-100 text-purple-700 border-purple-200',
+  VOID_MOVEMENT: 'bg-red-100 text-red-700 border-red-200',
 };
 
 function formatCOP(n: number): string {
@@ -147,6 +150,53 @@ export default async function RollTracePage({
       approverName: (m.approver?.name ?? null) as string | null,
     };
   });
+
+  // VOID_MOVEMENT entries live in AuditLog, not Movement, so they never show up in movRes
+  // above no matter what it selects — fetch them separately and merge into the timeline.
+  // entity/entityId can be either the current form (entity: 'Roll', entityId: rollId) or the
+  // legacy form (entity: 'Movement', entityId: movementId) from before that route was fixed.
+  const movementIds = rawMovements.map((m: any) => m.id as number);
+  const [voidByRollRes, voidByMovementRes] = await Promise.all([
+    dbAny.from('AuditLog').select('id, newData, createdAt, user:userId(name)')
+      .eq('action', 'VOID_MOVEMENT').eq('entity', 'Roll').eq('entityId', rollIdNum),
+    movementIds.length > 0
+      ? dbAny.from('AuditLog').select('id, newData, createdAt, user:userId(name)')
+          .eq('action', 'VOID_MOVEMENT').eq('entity', 'Movement').in('entityId', movementIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const voidLogs: any[] = [...(voidByRollRes.data ?? []), ...(voidByMovementRes.data ?? [])];
+  const voidEntries = voidLogs.map((log: any) => {
+    let reason: string | null = null;
+    try { reason = JSON.parse(log.newData ?? '{}').reason ?? null; } catch { /* ignore */ }
+    return {
+      id: log.id as number,
+      createdAt: log.createdAt as number,
+      type: 'VOID_MOVEMENT',
+      meters: 0,
+      metersAfter: 0,
+      notes: reason,
+      pricePerMeter: null as number | null,
+      discount: 0,
+      total: null as number | null,
+      userName: log.user?.name ?? '—',
+      saleId: null as number | null,
+      clientName: null as string | null,
+      clientType: null as string | null,
+      reverted: false,
+      approvalStatus: 'APPROVED',
+      approvedAt: null as number | null,
+      approverName: null as string | null,
+    };
+  });
+
+  // Merged, chronologically-ordered view — this is what actually renders below.
+  const timeline = [...movements, ...voidEntries].sort((a, b) => a.createdAt - b.createdAt);
+  // Index of the last *real* movement (ignoring anulaciones) — used to label the final
+  // balance "(agotado)"; a trailing void entry shouldn't shift that.
+  const lastRealIndex = timeline.reduce(
+    (acc, item, idx) => (item.type !== 'VOID_MOVEMENT' ? idx : acc), -1,
+  );
 
   const rollDisplay = r.disaNumber ?? `ID ${rollIdNum}`;
 
@@ -269,20 +319,21 @@ export default async function RollTracePage({
       {/* Timeline */}
       <div className="bg-white border border-[#E5E5E5] rounded-lg p-5">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-5">
-          Línea de tiempo — {movements.length} movimiento{movements.length !== 1 ? 's' : ''}
+          Línea de tiempo — {timeline.length} movimiento{timeline.length !== 1 ? 's' : ''}
         </h2>
 
-        {movements.length === 0 ? (
+        {timeline.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-10">Sin movimientos registrados</p>
         ) : (
           <div className="relative">
             <div className="absolute left-5 top-0 bottom-0 w-px bg-[#E5E5E5]" />
             <div className="space-y-6">
-              {movements.map((m, i) => {
+              {timeline.map((m, i) => {
                 const isExitMov = m.type === 'EXIT_FULL' || m.type === 'EXIT_PARTIAL';
+                const isVoidMov = m.type === 'VOID_MOVEMENT';
                 const { fecha, hora } = buildPDFDateStrings(m.createdAt);
                 return (
-                  <div key={m.id} className={`relative flex gap-4 ${m.reverted ? 'opacity-50' : ''}`}>
+                  <div key={`${m.type}-${m.id}`} className={`relative flex gap-4 ${m.reverted ? 'opacity-50' : ''}`}>
                     <div className={`w-10 h-10 rounded-full border flex items-center justify-center flex-shrink-0 z-10 text-base ${MOVEMENT_COLOR[m.type] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                       {MOVEMENT_EMOJI[m.type] ?? '·'}
                     </div>
@@ -349,7 +400,7 @@ export default async function RollTracePage({
                       </div>
 
                       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 mb-1.5">
-                        {m.type === 'ENTRY' ? (
+                        {!isVoidMov && (m.type === 'ENTRY' ? (
                           <span>
                             <span className="text-gray-400">Metros registrados: </span>
                             <span className="font-semibold text-green-700">{m.meters} m</span>
@@ -364,21 +415,23 @@ export default async function RollTracePage({
                             <span className="text-gray-400">Metros descontados: </span>
                             <span className="font-semibold text-red-700">{m.meters} m</span>
                           </span>
-                        )}
-                        <span>
-                          <span className="text-gray-400">Restantes: </span>
-                          <span className={`font-semibold ${
-                            m.metersAfter === 0
-                              ? 'text-red-600'
-                              : m.metersAfter < initialMeters
-                                ? 'text-amber-600'
-                                : 'text-gray-900'
-                          }`}>
-                            {m.metersAfter} m
-                            {m.metersAfter === 0 && i === movements.length - 1 ? ' (agotado)' : ''}
-                            {m.metersAfter > 0 && m.metersAfter < initialMeters ? ' (remanente)' : ''}
+                        ))}
+                        {!isVoidMov && (
+                          <span>
+                            <span className="text-gray-400">Restantes: </span>
+                            <span className={`font-semibold ${
+                              m.metersAfter === 0
+                                ? 'text-red-600'
+                                : m.metersAfter < initialMeters
+                                  ? 'text-amber-600'
+                                  : 'text-gray-900'
+                            }`}>
+                              {m.metersAfter} m
+                              {m.metersAfter === 0 && i === lastRealIndex ? ' (agotado)' : ''}
+                              {m.metersAfter > 0 && m.metersAfter < initialMeters ? ' (remanente)' : ''}
+                            </span>
                           </span>
-                        </span>
+                        )}
                         <span>
                           <span className="text-gray-400">Por: </span>
                           <span className="font-medium text-gray-700">{m.userName}</span>
