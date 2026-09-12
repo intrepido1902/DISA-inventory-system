@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { formatColombianDate } from '@/lib/dateUtils';
+import jsPDF from 'jspdf';
 
 interface Sale {
   id: number;
@@ -55,6 +56,7 @@ export default function SalesClient({
   const [dateFrom, setDateFrom] = useState(initialDateFrom);
   const [dateTo, setDateTo] = useState(initialDateTo);
   const [isFetching, setIsFetching] = useState(false);
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
   const isFirstMount = useRef(true);
 
   useEffect(() => {
@@ -110,6 +112,147 @@ export default function SalesClient({
   const pageTotal = sales.reduce((sum, s) => sum + s.total, 0);
   const pageMeters = sales.reduce((sum, s) => sum + s.totalMeters, 0);
 
+  async function handleExportPDF() {
+    setIsPdfExporting(true);
+    try {
+      const params = new URLSearchParams({ page: '1', limit: '5000' });
+      if (clientId)  params.set('clientId',  clientId);
+      if (dateFrom)  params.set('dateFrom',  dateFrom);
+      if (dateTo)    params.set('dateTo',    dateTo);
+
+      const res = await fetch(`/api/sales?${params}`);
+      const json = await res.json();
+      const allSales: Sale[] = json.data ?? [];
+
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+      const PW = 297;
+      const MARGIN = 12;
+      const COL_W = isOwner ? [42, 60, 18, 22, 35, 18, 35] : [42, 100, 22, 30];
+      const HEADERS = isOwner
+        ? ['Fecha y hora', 'Cliente', 'Rollos', 'Metros', 'Subtotal', 'Desc.', 'Total']
+        : ['Fecha y hora', 'Cliente', 'Rollos', 'Metros'];
+      const LINE_H = 7;
+      let y = MARGIN;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(20);
+      doc.text('DISA — Historial de Ventas', MARGIN, y);
+      y += 7;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      const parts: string[] = [];
+      if (clientId) {
+        const cl = clients.find(c => String(c.id) === clientId);
+        if (cl) parts.push(`Cliente: ${cl.name}`);
+      }
+      if (dateFrom) parts.push(`Desde: ${dateFrom}`);
+      if (dateTo)   parts.push(`Hasta: ${dateTo}`);
+      if (!parts.length) parts.push('Todas las ventas');
+      doc.text(parts.join('   ·   '), MARGIN, y);
+      y += 4;
+
+      doc.setDrawColor(200);
+      doc.setLineWidth(0.3);
+      doc.line(MARGIN, y, PW - MARGIN, y);
+      y += 5;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      let x = MARGIN;
+      for (let i = 0; i < HEADERS.length; i++) {
+        const align = i >= 2 ? 'right' : 'left';
+        if (align === 'right') {
+          doc.text(HEADERS[i], x + COL_W[i], y, { align: 'right' });
+        } else {
+          doc.text(HEADERS[i], x, y);
+        }
+        x += COL_W[i];
+      }
+      y += 2;
+      doc.setDrawColor(180);
+      doc.line(MARGIN, y, PW - MARGIN, y);
+      y += 4;
+
+      let grandTotal = 0;
+      let grandMeters = 0;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      for (const s of allSales) {
+        if (y > 185) { doc.addPage(); y = MARGIN + 5; }
+        doc.setTextColor(60);
+        x = MARGIN;
+        const cols = isOwner
+          ? [
+              formatColombianDate(s.createdAt),
+              s.clientName,
+              String(s.rollCount),
+              `${Number(s.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m`,
+              formatCOP(s.subtotal),
+              s.discount > 0 ? `${s.discount}%` : '—',
+              formatCOP(s.total),
+            ]
+          : [
+              formatColombianDate(s.createdAt),
+              s.clientName,
+              String(s.rollCount),
+              `${Number(s.totalMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m`,
+            ];
+        for (let i = 0; i < cols.length; i++) {
+          const align = i >= 2 ? 'right' : 'left';
+          let text = cols[i];
+          if (i === 1 && text.length > 28) text = text.slice(0, 27) + '…';
+          if (align === 'right') {
+            doc.text(text, x + COL_W[i], y, { align: 'right' });
+          } else {
+            doc.text(text, x, y);
+          }
+          x += COL_W[i];
+        }
+        grandTotal += s.total;
+        grandMeters += s.totalMeters;
+        y += LINE_H;
+      }
+
+      y += 1;
+      doc.setDrawColor(180);
+      doc.line(MARGIN, y, PW - MARGIN, y);
+      y += 5;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(20);
+      doc.text(`Total registros: ${allSales.length}`, MARGIN, y);
+      x = MARGIN;
+      for (let i = 0; i < COL_W.length; i++) x += COL_W[i];
+      if (isOwner) {
+        doc.text(formatCOP(grandTotal), x, y, { align: 'right' });
+        const metersX = MARGIN + COL_W[0] + COL_W[1] + COL_W[2] + COL_W[3];
+        doc.text(`${Number(grandMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m`, metersX, y, { align: 'right' });
+      } else {
+        doc.text(`${Number(grandMeters).toLocaleString('es-CO', { maximumFractionDigits: 1 })} m`, x, y, { align: 'right' });
+      }
+
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(140);
+      const now = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      doc.text(`Generado el ${now}`, MARGIN, y);
+
+      const datePart = dateFrom && dateTo ? `_${dateFrom}_${dateTo}` : dateFrom ? `_desde_${dateFrom}` : dateTo ? `_hasta_${dateTo}` : '';
+      doc.save(`ventas${datePart}.pdf`);
+    } catch (err) {
+      console.error('PDF export error:', err);
+      alert('Error al generar el PDF. Intenta de nuevo.');
+    } finally {
+      setIsPdfExporting(false);
+    }
+  }
+
   return (
     <div className="p-4 lg:p-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -120,6 +263,25 @@ export default function SalesClient({
             {isFetching ? 'Cargando…' : `${total} venta${total !== 1 ? 's' : ''} en total`}
           </p>
         </div>
+        <button
+          onClick={handleExportPDF}
+          disabled={isPdfExporting || isFetching || total === 0}
+          className="flex items-center gap-1.5 text-sm px-3 py-2 rounded border border-[#E5E5E5] bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {isPdfExporting ? (
+            <>
+              <span className="inline-block w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+              Generando…
+            </>
+          ) : (
+            <>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              </svg>
+              Exportar PDF
+            </>
+          )}
+        </button>
       </div>
 
       {/* Filters */}
