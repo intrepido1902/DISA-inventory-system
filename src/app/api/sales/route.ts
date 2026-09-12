@@ -22,21 +22,48 @@ export async function GET(request: NextRequest) {
   try {
     const dbAny = db as any;
 
-    let query = dbAny
-      .from('Sale')
-      .select('id, clientId, clientName, date, subtotal, discount, total, createdAt', { count: 'exact' });
+    // Shared filters applied both to the paginated Sale fetch and to the "all matching ids"
+    // query used below to compute the true (non-voided) count.
+    function applySaleFilters(q: any) {
+      if (clientIdParam) q = q.eq('clientId', Number(clientIdParam));
+      if (dateFrom) q = q.gte('createdAt', new Date(dateFrom).setHours(0, 0, 0, 0));
+      if (dateTo)   q = q.lte('createdAt', new Date(dateTo).setHours(23, 59, 59, 999));
+      return q;
+    }
 
-    if (clientIdParam) query = query.eq('clientId', Number(clientIdParam));
-    if (dateFrom) query = query.gte('createdAt', new Date(dateFrom).setHours(0, 0, 0, 0));
-    if (dateTo)   query = query.lte('createdAt', new Date(dateTo).setHours(23, 59, 59, 999));
-
-    const { data: sales, count, error } = await query
+    const { data: sales, error } = await applySaleFilters(
+      dbAny.from('Sale').select('id, clientId, clientName, date, subtotal, discount, total, createdAt')
+    )
       .order('createdAt', { ascending: false })
       .range(from, to);
 
     if (error) throw error;
 
-    const total = count ?? 0;
+    // Supabase's count: 'exact' on Sale counts fully-voided sales too (every movement
+    // reverted). The true total is the number of sales — across ALL pages matching the
+    // filters, not just this one — that still have at least one non-reverted exit movement.
+    const { data: allSaleIdRows, error: idsError } = await applySaleFilters(
+      dbAny.from('Sale').select('id').limit(10000)
+    );
+    if (idsError) throw idsError;
+
+    const allSaleIds = (allSaleIdRows ?? []).map((r: any) => r.id as number);
+
+    const activeSaleIds = new Set<number>();
+    const CHUNK = 500;
+    for (let i = 0; i < allSaleIds.length; i += CHUNK) {
+      const chunk = allSaleIds.slice(i, i + CHUNK);
+      const { data: activeRows, error: activeErr } = await dbAny
+        .from('Movement')
+        .select('saleId')
+        .in('type', ['EXIT_FULL', 'EXIT_PARTIAL'])
+        .neq('reverted', true)
+        .in('saleId', chunk);
+      if (activeErr) throw activeErr;
+      for (const r of activeRows ?? []) activeSaleIds.add(r.saleId as number);
+    }
+
+    const total = activeSaleIds.size;
 
     if (!sales || sales.length === 0) {
       return Response.json({ data: [], total, totalPages: Math.ceil(total / limit) });
